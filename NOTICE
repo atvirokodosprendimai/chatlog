@@ -1,0 +1,22 @@
+chatlog
+Copyright (C) 2026 Atviro kodo sprendimai
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License, version 3 only, as published by the Free Software Foundation.
+See LICENSE.
+
+It links these modules (go list -deps ./cmd/chatlog), each under its own licence, all compatible
+with AGPL-3.0-only; their licence texts ship in the module sources:
+
+  github.com/dustin/go-humanize                MIT
+  github.com/google/jsonschema-go              MIT
+  github.com/google/uuid                       BSD-3-Clause
+  github.com/mark3labs/mcp-go                  MIT
+  github.com/philippgille/chromem-go           MPL-2.0 (GPL-compatible secondary licence, files unmodified)
+  github.com/remyoudompheng/bigfft             BSD-3-Clause
+  github.com/santhosh-tekuri/jsonschema/v6     Apache-2.0
+  github.com/spf13/cast                        MIT
+  github.com/urfave/cli/v3                     MIT
+  github.com/yosida95/uritemplate/v3           BSD-3-Clause
+  golang.org/x/sys, golang.org/x/text          BSD-3-Clause
+  modernc.org/libc, mathutil, memory, sqlite   BSD-3-Clause (sqlite: SQLite itself is public domain)

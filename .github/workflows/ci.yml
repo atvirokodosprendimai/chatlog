@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Atviro kodo sprendimai
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: vet
+        run: go vet ./...
+      - name: build
+        run: go build ./...
+      - name: test (words_test.go fails on the forbidden word; install tests run the binary in a throwaway HOME)
+        run: go test ./...
+      - name: black-box spec tests
+        run: |
+          go build -o "$RUNNER_TEMP/chatlog" ./cmd/chatlog
+          B="$RUNNER_TEMP/chatlog" sh test/spec_test.sh | tee "$RUNNER_TEMP/spec.out"
+          grep -q 'fail=0' "$RUNNER_TEMP/spec.out"
+      - name: cross build of every release target (CGO off)
+        if: matrix.os == 'ubuntu-latest'
+        run: sh scripts/release-build.sh ci-${{ github.sha }} "$RUNNER_TEMP/dist"

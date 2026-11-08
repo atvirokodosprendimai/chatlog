@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Atviro kodo sprendimai
+
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/atvirokodosprendimai/chatlog/internal/search"
+	"github.com/atvirokodosprendimai/chatlog/internal/store"
+)
+
+func server(t *testing.T) (*httptest.Server, *store.Store) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "chatlog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	srv := httptest.NewServer(Handler(&search.Service{Store: st}, nil))
+	t.Cleanup(srv.Close)
+	return srv, st
+}
+
+func post(t *testing.T, srv *httptest.Server, path, body string) (int, string) {
+	t.Helper()
+	resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var b bytes.Buffer
+	b.ReadFrom(resp.Body)
+	return resp.StatusCode, b.String()
+}
+
+func TestKVReadFollowsEdgesBothWaysAndByObject(t *testing.T) {
+	srv, st := server(t)
+	ctx := context.Background()
+	st.KVWrite(ctx, map[string]string{"waits/m/image": "WAIT M", "now/jur/api": "STATE live", "fact/x": "x"}, nil)
+	if code, body := post(t, srv, "/kv/link", `{"add":[{"s":"waits/m/image","p":"blocked_by","o":"now/jur/api"},{"s":"now/jur/api","p":"applies_to","o":"island/juridiniai"}]}`); code != 200 || !strings.Contains(body, `"added":2`) {
+		t.Fatalf("link: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "/kv/link", `{"add":[{"s":"fact/x","p":"causes","o":"y"}]}`); code != 400 {
+		t.Fatalf("a predicate not on the list: %d %s", code, body)
+	}
+	_, body := post(t, srv, "/kv/read", `{"keys":["now/jur/api"],"follow":1}`)
+	var got []store.KV
+	if err := json.Unmarshal([]byte(body), &got); err != nil || len(got) != 1 {
+		t.Fatalf("%s %v", body, err)
+	}
+	if len(got[0].Out) != 1 || got[0].Out[0] != (store.Edge{P: "applies_to", O: "island/juridiniai"}) ||
+		len(got[0].In) != 1 || got[0].In[0] != (store.Edge{S: "waits/m/image", P: "blocked_by"}) {
+		t.Fatalf("one hop out and in: %s", body)
+	}
+	_, body = post(t, srv, "/kv/read", `{"linked_to":"island/juridiniai"}`)
+	if json.Unmarshal([]byte(body), &got); len(got) != 1 || got[0].Key != "now/jur/api" {
+		t.Fatalf("linked_to: %s", body)
+	}
+	if _, body = post(t, srv, "/kv/read", `{"linked_to":"island/none"}`); strings.TrimSpace(body) != "[]" {
+		t.Fatalf("nothing linked is an empty list: %s", body)
+	}
+	if code, _ := post(t, srv, "/kv/read", `{"keys":["fact/x"],"follow":2}`); code != 400 {
+		t.Fatalf("follow 2: %d", code)
+	}
+}
+
+func TestKVReadWithoutFollowCarriesNoEdges(t *testing.T) {
+	srv, st := server(t)
+	ctx := context.Background()
+	st.KVWrite(ctx, map[string]string{"fact/a": "v", "fact/b": "w"}, nil)
+	st.KVLink(ctx, []store.Link{{S: "fact/a", P: "see_also", O: "fact/b"}}, nil)
+	_, body := post(t, srv, "/kv/read", `{"prefixes":["fact/"]}`)
+	var raw []map[string]any
+	if err := json.Unmarshal([]byte(body), &raw); err != nil || len(raw) != 2 {
+		t.Fatalf("%s %v", body, err)
+	}
+	for _, e := range raw {
+		for k := range e {
+			if k != "key" && k != "value" && k != "time" && k != "age" {
+				t.Fatalf("default read carries %q: %s", k, body)
+			}
+		}
+	}
+}
