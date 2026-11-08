@@ -20,7 +20,8 @@ Licence: AGPL-3.0-only (see `LICENSE` and `NOTICE`). Copyright (C) 2026 Atviro k
 Pick one; then restart Claude Code.
 
     # Homebrew (macOS, Linux)
-    brew install atvirokodosprendimai/chatlog/chatlog && chatlog install && chatlog doctor
+    brew tap atvirokodosprendimai/chatlog https://github.com/atvirokodosprendimai/chatlog && brew install chatlog
+    chatlog install --bin "$(brew --prefix)/bin/chatlog" && chatlog doctor
 
     # the release binary, no Go needed (macOS arm64/Intel, Linux amd64/arm64)
     curl -fsSL https://raw.githubusercontent.com/atvirokodosprendimai/chatlog/main/install.sh | sh
@@ -135,5 +136,5 @@ session-start digest). Environment: `CHATLOG_DIR` (data dir), `CHATLOG_SOCKET`, 
 
 `go test ./...` (the install tests run the built binary in a throwaway HOME; `words_test.go` keeps one organisation's
 name out of the tree), `B=<binary> sh test/spec_test.sh` (black-box tests written from the spec), `sh
-scripts/release-build.sh vX.Y.Z` (the release tarballs and `SHA256SUMS`, CGO off), `packaging/homebrew/` (the tap's
-formula generator). CI: `.github/workflows/`.
+scripts/release-build.sh vX.Y.Z` (the release tarballs and `SHA256SUMS`, CGO off), `packaging/homebrew/` (the
+generator of `Formula/chatlog.rb`: this repository is its own tap). CI: `.github/workflows/`.

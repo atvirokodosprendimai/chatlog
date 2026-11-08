@@ -2,19 +2,21 @@
 # Copyright (C) 2026 Atviro kodo sprendimai
 #
 # On a tag v*: tarballs for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 with SHA256SUMS on the GitHub release,
-# the container image on ghcr.io, and the Homebrew formula pushed to the tap.
-# Secrets: GITHUB_TOKEN (given by Actions) for the release and ghcr.io; TAP_TOKEN, a fine-grained token with contents
-# read/write on atvirokodosprendimai/homebrew-chatlog only, for the formula. Without TAP_TOKEN the tap step is skipped.
+# the container image on ghcr.io, and Formula/chatlog.rb in this repository regenerated for the release. The repository
+# is its own Homebrew tap (brew tap atvirokodosprendimai/chatlog https://github.com/atvirokodosprendimai/chatlog), so the
+# only credential is the workflow's own GITHUB_TOKEN.
 name: release
 on:
   push:
     tags: ["v*"]
 permissions:
-  contents: write
-  packages: write
+  contents: read
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # the GitHub release
+      packages: write # the image on ghcr.io
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -53,18 +55,29 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: VERSION=${{ github.ref_name }}
-      - name: Homebrew tap
+  formula:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # one commit of Formula/chatlog.rb to main
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0 # the tags, to tell whether this one is the latest
+      - name: Formula/chatlog.rb for this release
         env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$TAP_TOKEN" ]; then echo "TAP_TOKEN not set: tap not updated"; exit 0; fi
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/atvirokodosprendimai/homebrew-chatlog.git" tap
-          mkdir -p tap/Formula
-          sh packaging/homebrew/gen-formula.sh "$GITHUB_REF_NAME" dist/SHA256SUMS > tap/Formula/chatlog.rb
-          cd tap
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+          if [ "$latest" != "$GITHUB_REF_NAME" ]; then echo "$GITHUB_REF_NAME is not the latest tag ($latest): formula left as it is"; exit 0; fi
+          gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          mkdir -p Formula
+          sh packaging/homebrew/gen-formula.sh "$GITHUB_REF_NAME" "$RUNNER_TEMP/SHA256SUMS" > Formula/chatlog.rb
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Formula/chatlog.rb
-          if git diff --cached --quiet; then echo "the tap already holds this formula"; exit 0; fi
-          git commit -m "chatlog ${GITHUB_REF_NAME}"
-          git push origin HEAD
+          if git diff --cached --quiet; then echo "Formula/chatlog.rb already holds $GITHUB_REF_NAME"; exit 0; fi
+          git commit -m "formula for ${GITHUB_REF_NAME}"
+          git pull --rebase origin main
+          git push origin HEAD:main

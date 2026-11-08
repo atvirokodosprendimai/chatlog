@@ -41,7 +41,7 @@ only when the person asks for no local binary.
 
 ## 3. See what would change
 
-    # Homebrew: brew install atvirokodosprendimai/chatlog/chatlog, then
+    # Homebrew: brew tap atvirokodosprendimai/chatlog https://github.com/atvirokodosprendimai/chatlog && brew install chatlog, then
     chatlog install --dry-run
     # release binary:
     curl -fsSL https://raw.githubusercontent.com/atvirokodosprendimai/chatlog/main/install.sh | sh -s -- --dry-run
@@ -56,7 +56,7 @@ key order are kept.
 ## 4. Install
 
     # Homebrew:
-    chatlog install && chatlog ingest --all && chatlog doctor
+    chatlog install --bin "$(brew --prefix)/bin/chatlog" && chatlog ingest --all && chatlog doctor
     # release binary:
     curl -fsSL https://raw.githubusercontent.com/atvirokodosprendimai/chatlog/main/install.sh | sh
     # checkout:

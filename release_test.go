@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// The tap formula is generated from a release's SHA256SUMS; one missing entry must stop the release, not publish
+// The Homebrew formula is generated from a release's SHA256SUMS; one missing entry must stop the release, not publish
 // sha256 "".
 func TestGenFormula(t *testing.T) {
 	dir := t.TempDir()

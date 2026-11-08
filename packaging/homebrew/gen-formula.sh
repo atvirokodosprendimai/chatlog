@@ -3,9 +3,9 @@
 # Copyright (C) 2026 Atviro kodo sprendimai
 #
 # gen-formula.sh VERSION SHA256SUMS > Formula/chatlog.rb
-# Writes the Homebrew formula of the tap (github.com/atvirokodosprendimai/homebrew-chatlog) for one release, from the
-# release's SHA256SUMS (scripts/release-build.sh writes it; CI uploads it beside the tarballs). The same inputs give the
-# same formula, so the tap can be rebuilt from any release.
+# Writes the Homebrew formula for one release, from the release's SHA256SUMS (scripts/release-build.sh writes it; CI
+# uploads it beside the tarballs). The formula lives in this repository, which is its own tap; the same inputs give
+# the same formula, so it can be rebuilt from any release.
 set -eu
 version=${1:?usage: gen-formula.sh VERSION SHA256SUMS}
 version=${version#v}

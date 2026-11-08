@@ -1,13 +1,15 @@
-# The Homebrew tap
+# The Homebrew formula
 
-The tap is the repository `github.com/atvirokodosprendimai/homebrew-chatlog` with one file, `Formula/chatlog.rb`.
-It is generated, never edited: `gen-formula.sh VERSION SHA256SUMS` writes it from a release's checksum file (the
-release workflow does this on every tag `v*` and pushes it to the tap with the `TAP_TOKEN` secret).
+This repository is its own Homebrew tap: `Formula/chatlog.rb` at its root, tapped by URL. On every tag `v*` that is
+the latest, the release workflow regenerates `Formula/chatlog.rb` with
+`gen-formula.sh VERSION SHA256SUMS` from the release's checksum file and commits it to `main` with the workflow's own
+`GITHUB_TOKEN` ("formula for vX"; nothing to commit is a success).
 
-Install, once the tap and a release exist:
+Install, once a release exists:
 
-    brew install atvirokodosprendimai/chatlog/chatlog
-    chatlog install && chatlog doctor
+    brew tap atvirokodosprendimai/chatlog https://github.com/atvirokodosprendimai/chatlog
+    brew install chatlog
+    chatlog install --bin "$(brew --prefix)/bin/chatlog" && chatlog doctor
 
 Rebuild the formula of any release by hand:
 
