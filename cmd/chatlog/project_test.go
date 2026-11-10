@@ -72,6 +72,16 @@ func TestProjectCommandListsNamesAndKeepsOneKeyPerName(t *testing.T) {
 	if out, _ := h.runIn(web, "doctor"); !strings.Contains(out, "ok    project: [") {
 		t.Fatalf("doctor shows the project it resolved:\n%s", out)
 	}
+	if out, _ := h.runIn(web, "project", "alias", "-d", "gateway-N"); strings.Contains(out, "no alias") {
+		t.Fatal(out)
+	}
+	// without an alias the short key stands once, not as its own label
+	for _, cmd := range []string{"project", "doctor"} {
+		out, _ := h.runIn(web, cmd)
+		if strings.Contains(out, "] [") || !strings.Contains(out, "] (key ") {
+			t.Fatalf("%s of an unnamed project:\n%s", cmd, out)
+		}
+	}
 	h.env = append(h.env, "CHATLOG_PROJECT=gateway-N")
 	if out, _ := h.runIn(other, "project"); !strings.Contains(out, "found by CHATLOG_PROJECT") || !strings.Contains(out, "gateway-N") {
 		t.Fatalf("the override:\n%s", out)

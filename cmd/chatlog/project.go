@@ -74,7 +74,14 @@ func describeProject(ctx context.Context, st *store.Store, cwd string) (string, 
 	if err != nil {
 		return "", err
 	}
-	label := st.Label(ctx, key)
+	names, err := st.Aliases(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	shown := project.Short(key)
+	if len(names) > 0 {
+		shown += " " + strings.Join(names, " ")
+	}
 	via := "the repository's root commit, from " + id.Root
 	switch {
 	case id.Env:
@@ -84,5 +91,5 @@ func describeProject(ctx context.Context, st *store.Store, cwd string) (string, 
 	case id.Key == "unknown":
 		via = "no directory known"
 	}
-	return fmt.Sprintf("%s %s (key %s, found by %s)", project.Short(key), label, key, via), nil
+	return fmt.Sprintf("%s (key %s, found by %s)", shown, key, via), nil
 }

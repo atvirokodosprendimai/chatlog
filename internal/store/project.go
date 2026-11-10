@@ -97,8 +97,8 @@ func (s *Store) ResolveProject(ctx context.Context, name string) (string, error)
 	return name, nil
 }
 
-// aliasesOf lists a key's aliases, the first given first.
-func (s *Store) aliasesOf(ctx context.Context, key string) ([]string, error) {
+// Aliases lists a key's aliases, the first given first.
+func (s *Store) Aliases(ctx context.Context, key string) ([]string, error) {
 	rows, err := s.r.QueryContext(ctx, `SELECT alias FROM project_alias WHERE key = ? ORDER BY rowid`, key)
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (s *Store) FindProject(ctx context.Context, name string) (key string, names
 	if key, err = s.ResolveProject(ctx, name); err != nil {
 		return "", nil, false, err
 	}
-	if names, err = s.aliasesOf(ctx, key); err != nil {
+	if names, err = s.Aliases(ctx, key); err != nil {
 		return "", nil, false, err
 	}
 	found = len(names) > 0 || project.IsSha(key) || strings.HasPrefix(key, "path:")
@@ -156,7 +156,7 @@ func (s *Store) Label(ctx context.Context, name string) string {
 	if err != nil {
 		return name
 	}
-	if names, _ := s.aliasesOf(ctx, key); len(names) > 0 {
+	if names, _ := s.Aliases(ctx, key); len(names) > 0 {
 		return names[0]
 	}
 	return shortKey(key)
@@ -233,7 +233,7 @@ func (s *Store) Projects(ctx context.Context) ([]ProjectInfo, error) {
 	var out []ProjectInfo
 	for _, k := range keys {
 		p := ProjectInfo{Key: k}
-		if p.Aliases, err = s.aliasesOf(ctx, k); err != nil {
+		if p.Aliases, err = s.Aliases(ctx, k); err != nil {
 			return nil, err
 		}
 		if err := s.r.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM exchanges WHERE pkey = ?1), (SELECT count(DISTINCT key) FROM kv WHERE project = ?1)`, k).Scan(&p.Exchanges, &p.Notes); err != nil {
