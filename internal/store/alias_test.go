@@ -146,3 +146,14 @@ func TestTheShortShaTheListingShowsNamesTheProjectEverywhere(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAliasSpelledInCapitalsLikeHexStillResolves(t *testing.T) {
+	ctx, s := context.Background(), open(t)
+	putKeyed(t, s, keyA, "app", 1, "a1")
+	if err := s.AddAlias(ctx, "app", "CAFE"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ResolveProject(ctx, "CAFE"); err != nil || got != keyA {
+		t.Fatalf("CAFE -> %q %v", got, err)
+	}
+}

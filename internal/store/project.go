@@ -54,9 +54,6 @@ func (s *Store) ResolveProject(ctx context.Context, name string) (string, error)
 	if n, ok := strings.CutPrefix(name, "["); ok {
 		name = strings.TrimSuffix(n, "]")
 	}
-	if l := strings.ToLower(name); l != name && hexRE.MatchString(l) {
-		name = l // a short sha typed in capitals
-	}
 	switch name {
 	case "":
 		return "", refuse("a project name is empty: the MCP server sends its own, so restart a session that began before projects existed")
@@ -69,6 +66,9 @@ func (s *Store) ResolveProject(ctx context.Context, name string) (string, error)
 		return key, nil
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", err
+	}
+	if l := strings.ToLower(name); l != name && hexRE.MatchString(l) {
+		name = l // a short sha typed in capitals, when no alias is spelled so
 	}
 	if project.IsSha(name) || strings.HasPrefix(name, "path:") || !hexRE.MatchString(name) {
 		return name, nil
