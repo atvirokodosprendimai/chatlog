@@ -75,6 +75,9 @@ of a call (a fleet agent in ~/work/x sets <project>-fleet). Secrets are redacted
 ` + mcpserver.Core + `
 Origin: the exchange typed into a subagent's window is subagent, the rest main (the user's own session). chat_search, chat_tail and the
 wake digest read main only, so what agents did never fills the user's context; origin=subagent or all widens a search or a tail.
+Archive: a row can be archived, kept but hidden from every read (chat_search, chat_tail, the wake digest) because it is old and maybe no longer
+true. chat_search archive=true also searches it, and a hit says archived: true. chat_archive id archived=false why=<what you checked> restores
+that row only and answers with the archived rows one link away (id and one line each): read them and restore each that still holds, one by one.
 
 Notes in detail (kv_*):
   key      at most 5 segments split by /, no spaces: now/release/build, rule/tests-first, tool/kv-write
@@ -384,13 +387,14 @@ func searchCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "since"}, &cli.StringFlag{Name: "repo"},
 			&cli.StringFlag{Name: "origin", Usage: "default the user's own session; subagent or all"},
+			&cli.BoolFlag{Name: "archive", Usage: "also search the archive: rows kept but hidden by default, old and maybe no longer true"},
 			&cli.IntFlag{Name: "limit", Value: 10}, &cli.BoolFlag{Name: "json"},
 			&cli.StringFlag{Name: "mode"}, &cli.StringFlag{Name: "form"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			q := strings.Join(cmd.Args().Slice(), " ")
 			resp, err := api.NewClient(socketPath(cmd)).Search(ctx, search.Request{Query: q, Limit: cmd.Int("limit"),
-				Since: cmd.String("since"), Repo: cmd.String("repo"), Mode: cmd.String("mode"), Form: cmd.String("form"), Origin: cmd.String("origin")})
+				Since: cmd.String("since"), Repo: cmd.String("repo"), Mode: cmd.String("mode"), Form: cmd.String("form"), Origin: cmd.String("origin"), Archive: cmd.Bool("archive")})
 			if err != nil {
 				return err
 			}
@@ -414,7 +418,7 @@ func printHits(r search.Response) {
 		fmt.Printf("DEGRADED %s\n", d)
 	}
 	for _, h := range r.Hits {
-		fmt.Printf("\n%.3f  id=%d  %s  %s  %s\n", h.Score, h.ID, h.Time.Local().Format("2006-01-02 15:04"), h.Project, h.Session)
+		fmt.Printf("\n%.3f  id=%d  %s  %s  %s%s\n", h.Score, h.ID, h.Time.Local().Format("2006-01-02 15:04"), h.Project, h.Session, map[bool]string{true: "  [archived]", false: ""}[h.Archived])
 		if h.Agent != "" {
 			fmt.Printf("  to agent %s\n", h.Agent)
 		}

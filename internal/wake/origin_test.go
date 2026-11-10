@@ -85,3 +85,24 @@ func TestWakeTailAndSearchShowOnlyTheUsersOwnSessionByDefault(t *testing.T) {
 		t.Errorf("tail with origin all: %d", len(all))
 	}
 }
+
+func TestArchivedRowsNeverReachTheWakeDigestOrTheTail(t *testing.T) {
+	ctx, st := context.Background(), twoWindows(t)
+	at := time.Date(2026, 11, 8, 9, 30, 0, 0, time.UTC)
+	old := store.Row{UUID: "old", Session: "import", Source: "f", Time: at, End: at, Project: "webshop", PKey: "path:/u/webshop", Words: "an archived room", Answer: "archived know-how", Sha: "o", Text: "archived know-how", Archived: true}
+	if err := st.Apply(ctx, "f-old", []store.Row{old}, store.Cursor{}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Digest(ctx, st, Compact, "webshop", time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC), 24000)
+	if err != nil || strings.Contains(d, "archived") || !strings.Contains(d, "what the user typed zebra") {
+		t.Fatalf("%v\n%s", err, d)
+	}
+	for _, o := range []string{"", store.OriginAll} {
+		items, _, _ := st.Tail(ctx, "webshop", o, 0, 100000)
+		for _, it := range items {
+			if strings.Contains(it.Text, "archived") {
+				t.Errorf("tail %q holds the archived row", o)
+			}
+		}
+	}
+}

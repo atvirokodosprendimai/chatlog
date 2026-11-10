@@ -67,6 +67,8 @@ Notes (kv) belong to a project: a call reads and writes its own project's notes 
 
 Origin: the exchange typed into a subagent's window is `subagent`, the rest `main` (the user's own session). `chat_search`, `chat_tail` and the wake digest read `main` only, so what agents did never fills the user's context; `origin=subagent` or `all` widens a search or a tail.
 
+Archive: a row can be archived, kept but hidden from every read (`chat_search`, `chat_tail`, the wake digest) because it is old and maybe no longer true. `chat_search archive=true` (`chatlog search --archive`) also searches it, and a hit says `archived: true`. The one way to change a row is `chat_archive id archived=false why=...`: it restores that row only, with a why that says what was checked, kept in the events table, and answers with the archived rows one link away (the same source drawer, the same entity of a fact, a replaced version), id and one line each, best linked first, at most 10 and a count of the rest. Nothing is restored for you: read each neighbour and restore the ones that still hold. `archived=true` puts a row back; `chatlog status` counts them.
+
 **How it is meant to be used** (stores, note keys, value format, tasks as steps, waking up): `docs/playbook.md`.
 
 ## Recall by hand

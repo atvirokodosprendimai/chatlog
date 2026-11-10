@@ -11,11 +11,12 @@ import (
 
 // columns added after the first release: what an older file lacks. A row from before has the default: no project key on
 // an exchange (it is matched by its name), the global scope on a note and on a link (it is seen by every project, as it
-// was). Nothing is rewritten, so an older version of the file's rows read the same.
+// was), and not archived on an exchange. Nothing is rewritten, so an older version of the file's rows read the same.
 var addedColumns = []struct{ table, col, ddl string }{
 	{"exchanges", "pkey", "TEXT NOT NULL DEFAULT ''"},
 	{"kv", "project", "TEXT NOT NULL DEFAULT ''"},
 	{"kv_link", "project", "TEXT NOT NULL DEFAULT ''"},
+	{"exchanges", "archived", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // migrate brings a file written by an older version up to the schema: each missing column is added, in one transaction, so

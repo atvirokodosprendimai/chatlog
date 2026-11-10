@@ -48,6 +48,7 @@ How to use chatlog (rules):
   9. The hooks apply rules kept in kv (hook/prompt/, sit/<g>, sit/<g>/sig|words/<n>, hook/check/rule/<n>): a new rule is a kv_write; ` + "`chatlog instructions`" + ` has the shapes.
   10. chat_search, chat_tail and the wake digest read the user's own session only: what subagents did is origin=subagent (or all).
   11. kv_* act on this project's notes and the global ones; a key under global/ is global; project= names another (an alias, a short sha, a key; * reads all).
+  12. chat_search archive=true also searches the archive (rows kept but hidden: old, maybe no longer true). One that still holds: chat_archive id archived=false why=<what you checked>; it restores that row only and lists its archived neighbours: check them and restore each that holds, one by one.
 `
 
 // Serve runs until stdin closes.
@@ -64,6 +65,7 @@ func Serve(c *api.Client, version string) error {
 		mcp.WithString("since", mcp.Description("YYYY-MM-DD or RFC3339, only exchanges from then on")),
 		mcp.WithString("repo", mcp.Description("part of a cwd or a project name")),
 		mcp.WithString("origin", mcp.Description("whose window: default the user's own session; subagent (what subagents did) or all")),
+		mcp.WithBoolean("archive", mcp.Description("true: also search the archive, rows kept but hidden by default because they are old and maybe no longer true; a hit says archived: true")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		q, err := r.RequireString("query")
 		if err != nil {
@@ -83,6 +85,22 @@ func Serve(c *api.Client, version string) error {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return jsonResult(c.Get(ctx, int64(id), r.GetInt("offset", 0), r.GetInt("length", 0)))
+	})
+	s.AddTool(mcp.NewTool("chat_archive",
+		mcp.WithDescription("The one way to move a row in or out of the archive (rows kept but hidden from every read unless chat_search asks for archive: true). archived false restores row `id` ONLY: say in `why` what you checked that says it still holds. The answer lists its archived neighbours (the same source, the same entity of a fact, a replaced version) with id and one line, best linked first: read each, and restore the ones that still hold, one by one; nothing is restored for you. archived true puts a row back."),
+		mcp.WithNumber("id", mcp.Required(), mcp.Description("the exchange id, from chat_search")),
+		mcp.WithBoolean("archived", mcp.Required(), mcp.Description("false restores, true archives")),
+		mcp.WithString("why", mcp.Description("required to restore: what you checked")),
+	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		id, err := r.RequireInt("id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		archived, err := r.RequireBool("archived")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(c.Archive(ctx, api.ArchiveRequest{ID: int64(id), Archived: archived, Why: r.GetString("why", "")}))
 	})
 	s.AddTool(mcp.NewTool("chat_status",
 		mcp.WithReadOnlyHintAnnotation(true),

@@ -52,13 +52,14 @@ var (
 
 // Request is one search.
 type Request struct {
-	Query  string `json:"query"`
-	Limit  int    `json:"limit,omitempty"`
-	Since  string `json:"since,omitempty"` // YYYY-MM-DD or RFC3339
-	Repo   string `json:"repo,omitempty"`
-	Mode   string `json:"mode,omitempty"` // eval's handle on the variants
-	Form   string `json:"form,omitempty"`
-	Origin string `json:"origin,omitempty"` // "" or main: the user's own session; subagent; all
+	Query   string `json:"query"`
+	Limit   int    `json:"limit,omitempty"`
+	Since   string `json:"since,omitempty"` // YYYY-MM-DD or RFC3339
+	Repo    string `json:"repo,omitempty"`
+	Mode    string `json:"mode,omitempty"` // eval's handle on the variants
+	Form    string `json:"form,omitempty"`
+	Origin  string `json:"origin,omitempty"`  // "" or main: the user's own session; subagent; all
+	Archive bool   `json:"archive,omitempty"` // also search the archived rows: old, and maybe no longer true
 }
 
 // Hit is one result. Fetch says how to read the whole exchange.
@@ -68,6 +69,7 @@ type Hit struct {
 	Score      float64   `json:"score"`
 	Session    string    `json:"session"`
 	Agent      string    `json:"agent,omitempty"`
+	Archived   bool      `json:"archived,omitempty"` // an archived row: found only because the archive was asked for
 	Time       time.Time `json:"time"`
 	Cwd        string    `json:"cwd"`
 	Project    string    `json:"project"`
@@ -250,7 +252,7 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 	if !store.ValidOrigin(r.Origin) {
 		return Response{}, fmt.Errorf("origin %q: main, subagent or all", r.Origin)
 	}
-	f := store.Filter{Since: since, Repo: r.Repo, Origin: r.Origin}
+	f := store.Filter{Since: since, Repo: r.Repo, Origin: r.Origin, Archive: r.Archive}
 	if r.Repo != "" { // an alias, a short sha or a key names the project; any other word is part of a path
 		key, names, found, err := s.Store.FindProject(ctx, r.Repo)
 		if err != nil {
@@ -305,7 +307,7 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 			continue
 		}
 		resp.Hits = append(resp.Hits, Hit{ID: id, UUID: row.UUID, Score: scores[id], Session: row.Session, Agent: row.Agent, Time: row.Time, Cwd: row.Cwd,
-			Project: row.Project, Words: tei.Clip(row.Words, 1000), AnswerHead: tei.Clip(row.Answer, 500), Fetch: fmt.Sprintf("chat_get(id=%d)", id)})
+			Archived: row.Archived, Project: row.Project, Words: tei.Clip(row.Words, 1000), AnswerHead: tei.Clip(row.Answer, 500), Fetch: fmt.Sprintf("chat_get(id=%d)", id)})
 	}
 	resp.TookMs = time.Since(start).Milliseconds()
 	return resp, nil

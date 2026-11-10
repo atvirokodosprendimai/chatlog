@@ -24,7 +24,7 @@ func (s *Store) Tail(ctx context.Context, project, origin string, before int64, 
 	if err != nil {
 		return nil, 0, err
 	}
-	q := `SELECT ` + rowCols + `, e.text FROM exchanges e WHERE ` + pc
+	q := `SELECT ` + rowCols + `, e.text FROM exchanges e WHERE e.archived = 0 AND ` + pc
 	if c := originCond(origin); c != "" {
 		q += ` AND ` + c
 	}
@@ -75,7 +75,7 @@ func (s *Store) Recent(ctx context.Context, project, origin string, n, textMax i
 	if err != nil {
 		return nil, err
 	}
-	q := `SELECT ` + rowCols + `, substr(e.text, 1, ?), e.text_len FROM exchanges e WHERE ` + pc
+	q := `SELECT ` + rowCols + `, substr(e.text, 1, ?), e.text_len FROM exchanges e WHERE e.archived = 0 AND ` + pc
 	if c := originCond(origin); c != "" {
 		q += ` AND ` + c
 	}

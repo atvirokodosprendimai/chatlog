@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS exchanges(
   id INTEGER PRIMARY KEY, uuid TEXT NOT NULL UNIQUE, session TEXT NOT NULL, agent TEXT NOT NULL, seq INTEGER NOT NULL, source TEXT NOT NULL,
   time TEXT NOT NULL, end_time TEXT NOT NULL, cwd TEXT NOT NULL, project TEXT NOT NULL, prio INTEGER NOT NULL, closed INTEGER NOT NULL,
   cut_bytes INTEGER NOT NULL, over_limit INTEGER NOT NULL, text_len INTEGER NOT NULL, sha TEXT NOT NULL, embedded_sha TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL, words TEXT NOT NULL, answer TEXT NOT NULL, embed_text TEXT NOT NULL, text TEXT NOT NULL, pkey TEXT NOT NULL DEFAULT '');
+  updated_at TEXT NOT NULL, words TEXT NOT NULL, answer TEXT NOT NULL, embed_text TEXT NOT NULL, text TEXT NOT NULL, pkey TEXT NOT NULL DEFAULT '', archived INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS exchanges_time ON exchanges(time);
 CREATE INDEX IF NOT EXISTS exchanges_pending ON exchanges(prio, time DESC) WHERE embedded_sha <> sha;
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(words, answer, text, content='exchanges', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
@@ -46,6 +46,8 @@ CREATE INDEX IF NOT EXISTS kv_link_o ON kv_link(o, rid);
 CREATE TABLE IF NOT EXISTS project_alias(alias TEXT PRIMARY KEY, key TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS project_alias_key ON project_alias(key);
 CREATE TABLE IF NOT EXISTS project_root(root TEXT PRIMARY KEY, key TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS row_ref(row INTEGER NOT NULL, ref TEXT NOT NULL, PRIMARY KEY(row, ref)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS row_ref_ref ON row_ref(ref);
 `
 
 // Store holds the two connection pools.
@@ -108,7 +110,9 @@ type Row struct {
 	End       time.Time `json:"end"`
 	Cwd       string    `json:"cwd"`
 	Project   string    `json:"project"`
-	PKey      string    `json:"pkey,omitempty"` // the project's key: see package project; empty on an exchange stored before keys
+	PKey      string    `json:"pkey,omitempty"`     // the project's key: see package project; empty on an exchange stored before keys
+	Archived  bool      `json:"archived,omitempty"` // hidden from every read unless it asks for the archive; see Archive
+	Refs      []string  `json:"-"`                  // what links this row to others (see row_ref): rows that share one are neighbours
 	Prio      int       `json:"-"`
 	Closed    bool      `json:"closed"`
 	CutBytes  int       `json:"cut_bytes"`
@@ -159,28 +163,46 @@ func (s *Store) Apply(ctx context.Context, path string, rows []Row, c Cursor) er
 }
 
 func upsert(ctx context.Context, tx *sql.Tx, r *Row, now string) error {
+	var id int64
 	var sha string
 	var textLen int
-	err := tx.QueryRowContext(ctx, `SELECT sha, text_len FROM exchanges WHERE uuid=?`, r.UUID).Scan(&sha, &textLen)
+	err := tx.QueryRowContext(ctx, `SELECT id, sha, text_len FROM exchanges WHERE uuid=?`, r.UUID).Scan(&id, &sha, &textLen)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		_, err := tx.ExecContext(ctx, `INSERT INTO exchanges(uuid, session, agent, seq, source, time, end_time, cwd, project, pkey, prio, closed, cut_bytes,
-			over_limit, text_len, sha, updated_at, words, answer, embed_text, text) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		// archived is set here and nowhere after: a row someone restored is not archived again by the import that made it
+		res, err := tx.ExecContext(ctx, `INSERT INTO exchanges(uuid, session, agent, seq, source, time, end_time, cwd, project, pkey, prio, closed, cut_bytes,
+			over_limit, text_len, sha, updated_at, words, answer, embed_text, text, archived) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			r.UUID, r.Session, r.Agent, r.Seq, r.Source, stamp(r.Time), stamp(r.End), r.Cwd, r.Project, r.PKey, r.Prio, r.Closed, r.CutBytes,
-			r.OverLimit, len(r.Text), r.Sha, now, r.Words, r.Answer, r.Embed, r.Text)
-		if err == nil && r.PKey != "" && validAlias(r.Project) == nil { // the folder's name is the first alias of its project
-			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO project_alias(alias, key) VALUES(?, ?)`, r.Project, r.PKey)
+			r.OverLimit, len(r.Text), r.Sha, now, r.Words, r.Answer, r.Embed, r.Text, r.Archived)
+		if err != nil {
+			return err
 		}
-		return err
+		if id, err = res.LastInsertId(); err != nil {
+			return err
+		}
+		if r.PKey != "" && validAlias(r.Project) == nil { // the folder's name is the first alias of its project
+			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO project_alias(alias, key) VALUES(?, ?)`, r.Project, r.PKey); err != nil {
+				return err
+			}
+		}
 	case err != nil:
 		return err
 	case sha == r.Sha || len(r.Text) < textLen:
-		_, err := tx.ExecContext(ctx, `UPDATE exchanges SET closed=max(closed, ?) WHERE uuid=?`, r.Closed, r.UUID)
-		return err
+		if _, err := tx.ExecContext(ctx, `UPDATE exchanges SET closed=max(closed, ?) WHERE uuid=?`, r.Closed, r.UUID); err != nil {
+			return err
+		}
+	default:
+		if _, err := tx.ExecContext(ctx, `UPDATE exchanges SET end_time=?, closed=?, cut_bytes=?, over_limit=?, text_len=?, sha=?, updated_at=?, words=?, answer=?, embed_text=?, text=? WHERE uuid=?`,
+			stamp(r.End), r.Closed, r.CutBytes, r.OverLimit, len(r.Text), r.Sha, now, r.Words, r.Answer, r.Embed, r.Text, r.UUID); err != nil {
+			return err
+		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE exchanges SET end_time=?, closed=?, cut_bytes=?, over_limit=?, text_len=?, sha=?, updated_at=?, words=?, answer=?, embed_text=?, text=? WHERE uuid=?`,
-		stamp(r.End), r.Closed, r.CutBytes, r.OverLimit, len(r.Text), r.Sha, now, r.Words, r.Answer, r.Embed, r.Text, r.UUID)
-	return err
+	for _, ref := range r.Refs {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO row_ref(row, ref) VALUES(?, ?)`, id, ref); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -260,13 +282,14 @@ func originCond(o string) string {
 	return `e.agent = ''`
 }
 
-// Filter narrows a search; Origin is main, subagent or all, empty for main.
+// Filter narrows a search; Origin is main, subagent or all, empty for main; Archive also reads the archived rows.
 type Filter struct {
-	Since  time.Time
-	Repo   string
-	Origin string
-	Key    string   // a project named by key or alias: it replaces Repo; see FindProject
-	Names  []string // the names of that project, for the exchanges stored before keys
+	Archive bool
+	Since   time.Time
+	Repo    string
+	Origin  string
+	Key     string   // a project named by key or alias: it replaces Repo; see FindProject
+	Names   []string // the names of that project, for the exchanges stored before keys
 }
 
 func (f Filter) where() (string, []any) {
@@ -283,6 +306,9 @@ func (f Filter) where() (string, []any) {
 	} else if f.Repo != "" {
 		cond = append(cond, `(e.cwd LIKE ? OR e.project LIKE ?)`)
 		args = append(args, "%"+f.Repo+"%", "%"+f.Repo+"%")
+	}
+	if !f.Archive {
+		cond = append(cond, `e.archived = 0`)
 	}
 	if c := originCond(f.Origin); c != "" {
 		cond = append(cond, c)
@@ -323,12 +349,12 @@ func (s *Store) FTS(ctx context.Context, query string, n int, f Filter) ([]int64
 	return out, rows.Err()
 }
 
-const rowCols = `e.id, e.uuid, e.session, e.agent, e.seq, e.source, e.time, e.end_time, e.cwd, e.project, e.closed, e.cut_bytes, e.over_limit, e.sha, e.words, e.answer`
+const rowCols = `e.id, e.uuid, e.session, e.agent, e.seq, e.source, e.time, e.end_time, e.cwd, e.project, e.closed, e.cut_bytes, e.over_limit, e.sha, e.words, e.answer, e.archived`
 
 func scanRow(sc interface{ Scan(...any) error }, extra ...any) (Row, error) {
 	var r Row
 	var t, end string
-	dest := append([]any{&r.ID, &r.UUID, &r.Session, &r.Agent, &r.Seq, &r.Source, &t, &end, &r.Cwd, &r.Project, &r.Closed, &r.CutBytes, &r.OverLimit, &r.Sha, &r.Words, &r.Answer}, extra...)
+	dest := append([]any{&r.ID, &r.UUID, &r.Session, &r.Agent, &r.Seq, &r.Source, &t, &end, &r.Cwd, &r.Project, &r.Closed, &r.CutBytes, &r.OverLimit, &r.Sha, &r.Words, &r.Answer, &r.Archived}, extra...)
 	if err := sc.Scan(dest...); err != nil {
 		return r, err
 	}
@@ -395,6 +421,7 @@ type Status struct {
 	Pending    int            `json:"pending_embeds"`
 	Cut        int            `json:"cut_chunks"`
 	OverLimit  int            `json:"over_limit_chunks"`
+	Archived   int            `json:"archived"`
 	Sessions   int            `json:"sessions"`
 	Files      int            `json:"files"`
 	LastIngest string         `json:"last_ingest"`
@@ -406,9 +433,9 @@ type Status struct {
 // Stats reads the status. The large columns are not touched.
 func (s *Store) Stats(ctx context.Context) (Status, error) {
 	var st Status
-	err := s.r.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(embedded_sha<>sha),0), coalesce(sum(cut_bytes>0),0), coalesce(sum(over_limit),0),
+	err := s.r.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(embedded_sha<>sha),0), coalesce(sum(cut_bytes>0),0), coalesce(sum(over_limit),0), coalesce(sum(archived),0),
 		count(DISTINCT session), coalesce(min(time),''), coalesce(max(time),'') FROM exchanges`).
-		Scan(&st.Chunks, &st.Pending, &st.Cut, &st.OverLimit, &st.Sessions, &st.Earliest, &st.Latest)
+		Scan(&st.Chunks, &st.Pending, &st.Cut, &st.OverLimit, &st.Archived, &st.Sessions, &st.Earliest, &st.Latest)
 	if err != nil {
 		return st, err
 	}

@@ -80,6 +80,13 @@ type KVSearchRequest struct {
 	Limit   int    `json:"limit,omitempty"`
 }
 
+// ArchiveRequest archives a row or, with archived false, restores it: that row only, and a why that says what was checked.
+type ArchiveRequest struct {
+	ID       int64  `json:"id"`
+	Archived bool   `json:"archived"`
+	Why      string `json:"why,omitempty"`
+}
+
 // Tail is one page of a project's latest exchanges; Next is the before of the page behind it, absent at the start.
 type Tail struct {
 	Items []store.Tailed `json:"items"`
@@ -177,6 +184,15 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 		}
 		hits, err := svc.KVSearch(r.Context(), req.Project, req.Query, req.Prefix, req.Limit)
 		reply(w, hits, err)
+	})
+	mux.HandleFunc("POST /archive", func(w http.ResponseWriter, r *http.Request) {
+		var req ArchiveRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		res, err := svc.Store.SetArchived(r.Context(), req.ID, req.Archived, req.Why)
+		reply(w, res, err)
 	})
 	mux.HandleFunc("GET /tail", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -383,6 +399,12 @@ func (c *Client) KVLink(ctx context.Context, r KVLinkRequest) (KVLinkResponse, e
 func (c *Client) KVSearch(ctx context.Context, r KVSearchRequest) ([]search.KVHit, error) {
 	out := []search.KVHit{}
 	return out, c.do(ctx, http.MethodPost, "/kv/search", r, &out)
+}
+
+// Archive archives a row, or restores it and lists the archived rows next to it.
+func (c *Client) Archive(ctx context.Context, r ArchiveRequest) (store.Restored, error) {
+	var out store.Restored
+	return out, c.do(ctx, http.MethodPost, "/archive", r, &out)
 }
 
 // Tail fetches one page of a project's latest exchanges of one origin ("" is the user's own session).

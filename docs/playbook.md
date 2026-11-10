@@ -108,6 +108,7 @@ A background agent gets the same convention in its brief.
 |---|---|
 | What did the user say, when, in which words | `chat_search query=<their words> [since] [repo]` |
 | One whole exchange | `chat_get id=<id> [offset] [length]` |
+| An old row that is hidden (archived) | `chat_search query=... archive=true`; one that still holds: `chat_archive id=<id> archived=false why=<what you checked>`, then its archived neighbours the answer lists, one by one |
 | What happened before a compaction or yesterday | `chat_tail project=<p> [before=<next_before>]` |
 | My notes, by key | `kv_read prefixes=["now/","waits/","task/open/"]` |
 | My notes, by subject | `kv_search query=<subject> [prefix]` |

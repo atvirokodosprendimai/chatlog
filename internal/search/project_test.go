@@ -41,3 +41,53 @@ func TestRepoTakesAnAliasAShortShaOrAPathWord(t *testing.T) {
 		}
 	}
 }
+
+func TestTheArchiveIsSearchedOnlyWhenAskedAndMarked(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	at := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	for _, r := range []store.Row{
+		{UUID: "live", Session: "s", Source: "f", Time: at, End: at, Project: "p", Words: "w", Answer: "a", Sha: "l", Text: "needle live"},
+		{UUID: "old", Session: "s", Source: "f", Time: at, End: at, Project: "p", Words: "w", Answer: "a", Sha: "o", Text: "needle archived", Archived: true},
+	} {
+		if err := st.Apply(ctx, "f-"+r.UUID, []store.Row{r}, store.Cursor{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &Service{Store: st}
+	hits := func(archive bool) (n int, archived int) {
+		resp, err := svc.Search(ctx, Request{Query: "needle", Mode: ModeFTS, Archive: archive})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, h := range resp.Hits {
+			if h.Archived {
+				archived++
+			}
+		}
+		return len(resp.Hits), archived
+	}
+	if n, a := hits(false); n != 1 || a != 0 {
+		t.Errorf("by default: %d hits, %d archived", n, a)
+	}
+	if n, a := hits(true); n != 2 || a != 1 {
+		t.Errorf("with the archive: %d hits, %d marked archived", n, a)
+	}
+	var id int64
+	all, _ := svc.Search(ctx, Request{Query: "needle", Mode: ModeFTS, Archive: true})
+	for _, h := range all.Hits {
+		if h.Archived {
+			id = h.ID
+		}
+	}
+	if _, err := st.SetArchived(ctx, id, false, "still holds"); err != nil {
+		t.Fatal(err)
+	}
+	if n, a := hits(false); n != 2 || a != 0 {
+		t.Errorf("after the restore, found by default: %d hits, %d archived", n, a)
+	}
+}

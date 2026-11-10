@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/atvirokodosprendimai/chatlog/internal/search"
 	"github.com/atvirokodosprendimai/chatlog/internal/store"
@@ -123,5 +124,27 @@ func TestOneProjectsNotesAreNotAnothersAcrossTheSocket(t *testing.T) {
 	}
 	if b := read("*"); !strings.Contains(b, "alpha's") {
 		t.Errorf("every project: %s", b)
+	}
+}
+
+func TestArchiveFlipAcrossTheSocket(t *testing.T) {
+	srv, st := server(t)
+	ctx := context.Background()
+	at := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	for _, r := range []store.Row{
+		{UUID: "a", Session: "s", Source: "f", Time: at, End: at, Words: "room a", Answer: "first", Sha: "a", Text: "a", Archived: true, Refs: []string{"ent:x"}},
+		{UUID: "b", Session: "s", Source: "f", Time: at, End: at, Words: "room b", Answer: "second", Sha: "b", Text: "b", Archived: true, Refs: []string{"ent:x"}},
+	} {
+		if err := st.Apply(ctx, "f-"+r.UUID, []store.Row{r}, store.Cursor{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, msg := post(t, srv, "/archive", `{"id":1,"archived":false}`); code != 400 || !strings.Contains(msg, "needs a why") {
+		t.Fatalf("no why: %d %s", code, msg)
+	}
+	code, body := post(t, srv, "/archive", `{"id":1,"archived":false,"why":"checked"}`)
+	var got store.Restored
+	if code != 200 || json.Unmarshal([]byte(body), &got) != nil || !got.Changed || len(got.Neighbours) != 1 || got.Neighbours[0].ID != 2 || !strings.Contains(got.Neighbours[0].Line, "room b") {
+		t.Fatalf("%d %s", code, body)
 	}
 }
