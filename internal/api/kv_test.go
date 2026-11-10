@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,17 +93,29 @@ func TestKVReadWithoutFollowCarriesNoEdges(t *testing.T) {
 	}
 }
 
-func TestEveryKVRequestNamesItsProject(t *testing.T) {
-	srv, _ := server(t)
-	for path, body := range map[string]string{
-		"/kv/read":   `{"prefixes":[""]}`,
-		"/kv/write":  `{"set":{"a":"b"}}`,
-		"/kv/link":   `{"add":[{"s":"a","p":"see_also","o":"x"}]}`,
-		"/kv/search": `{"query":"x"}`,
-	} {
-		if code, msg := post(t, srv, path, body); code != 400 || !strings.Contains(msg, "a project name is empty") {
-			t.Errorf("%s without a project: %d %q", path, code, msg)
-		}
+// A script or hook from before projects sends no project: it is read as the CLI reads a call, by its cwd when it sends
+// one and else as the global notes, never refused.
+func TestARequestWithoutAProjectResolvesLikeTheCLI(t *testing.T) {
+	srv, st := server(t)
+	cwd := t.TempDir()
+	if code, msg := post(t, srv, "/kv/write", `{"set":{"a":"global note"}}`); code != 200 {
+		t.Fatalf("write without a project: %d %q", code, msg)
+	}
+	if code, msg := post(t, srv, "/kv/write", `{"cwd":`+strconv.Quote(cwd)+`,"set":{"a":"cwd note"}}`); code != 200 {
+		t.Fatalf("write with a cwd: %d %q", code, msg)
+	}
+	if code, msg := post(t, srv, "/kv/link", `{"add":[{"s":"a","p":"see_also","o":"x"}]}`); code != 200 {
+		t.Fatalf("link without a project: %d %q", code, msg)
+	}
+	if code, msg := post(t, srv, "/kv/read", `{"prefixes":[""]}`); code != 200 || !strings.Contains(msg, "global note") || strings.Contains(msg, "cwd note") {
+		t.Errorf("read without a project is the global notes: %d %q", code, msg)
+	}
+	if code, msg := post(t, srv, "/kv/read", `{"cwd":`+strconv.Quote(cwd)+`,"prefixes":[""]}`); code != 200 || !strings.Contains(msg, "cwd note") || strings.Contains(msg, "global note") {
+		t.Errorf("read with a cwd is that directory's project: %d %q", code, msg)
+	}
+	// the search has no embedder in this server: its project is resolved by the same function
+	if got := requestProject(context.Background(), st, "", ""); got != store.GlobalProject {
+		t.Errorf("search without a project: %q", got)
 	}
 	if code, _ := post(t, srv, "/kv/write", `{"project":"*","set":{"a":"b"}}`); code != 400 {
 		t.Errorf("a write for every project: %d", code)

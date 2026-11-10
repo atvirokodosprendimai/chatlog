@@ -16,8 +16,10 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/atvirokodosprendimai/chatlog/internal/project"
 	"github.com/atvirokodosprendimai/chatlog/internal/search"
 	"github.com/atvirokodosprendimai/chatlog/internal/store"
 )
@@ -39,6 +41,7 @@ const (
 // to that object; Follow 1 lists each key's edges out and in, one hop.
 type KVReadRequest struct {
 	Project  string   `json:"project"`
+	Cwd      string   `json:"cwd,omitempty"` // the caller\'s directory, read as the CLI reads it when Project is empty
 	Keys     []string `json:"keys,omitempty"`
 	Prefixes []string `json:"prefixes,omitempty"`
 	At       string   `json:"at,omitempty"`
@@ -49,6 +52,7 @@ type KVReadRequest struct {
 // KVWriteRequest sets and deletes keys in one transaction.
 type KVWriteRequest struct {
 	Project string            `json:"project"`
+	Cwd     string            `json:"cwd,omitempty"` // the caller\'s directory, read as the CLI reads it when Project is empty
 	Set     map[string]string `json:"set,omitempty"`
 	Del     []string          `json:"del,omitempty"`
 }
@@ -56,6 +60,7 @@ type KVWriteRequest struct {
 // KVLinkRequest adds and deletes links in one transaction.
 type KVLinkRequest struct {
 	Project string       `json:"project"`
+	Cwd     string       `json:"cwd,omitempty"` // the caller\'s directory, read as the CLI reads it when Project is empty
 	Add     []store.Link `json:"add,omitempty"`
 	Del     []store.Link `json:"del,omitempty"`
 }
@@ -75,6 +80,7 @@ type KVWriteResponse struct {
 // KVSearchRequest finds notes by meaning; Prefix narrows to a subtree of keys.
 type KVSearchRequest struct {
 	Project string `json:"project"`
+	Cwd     string `json:"cwd,omitempty"` // the caller\'s directory, read as the CLI reads it when Project is empty
 	Query   string `json:"query"`
 	Prefix  string `json:"prefix,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
@@ -155,6 +161,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 				return
 			}
 		}
+		req.Project = requestProject(r.Context(), svc.Store, req.Project, req.Cwd)
 		kv, err := kvRead(r.Context(), svc.Store, req, at)
 		reply(w, kv, err)
 	})
@@ -164,7 +171,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		warn, err := svc.Store.KVWrite(r.Context(), req.Project, req.Set, req.Del)
+		warn, err := svc.Store.KVWrite(r.Context(), requestProject(r.Context(), svc.Store, req.Project, req.Cwd), req.Set, req.Del)
 		reply(w, KVWriteResponse{Written: len(req.Set) + len(req.Del), Warnings: warn}, err)
 	})
 	mux.HandleFunc("POST /kv/link", func(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +180,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		err := svc.Store.KVLink(r.Context(), req.Project, req.Add, req.Del)
+		err := svc.Store.KVLink(r.Context(), requestProject(r.Context(), svc.Store, req.Project, req.Cwd), req.Add, req.Del)
 		reply(w, KVLinkResponse{Added: len(req.Add), Deleted: len(req.Del)}, err)
 	})
 	mux.HandleFunc("POST /kv/search", func(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +189,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		hits, err := svc.KVSearch(r.Context(), req.Project, req.Query, req.Prefix, req.Limit)
+		hits, err := svc.KVSearch(r.Context(), requestProject(r.Context(), svc.Store, req.Project, req.Cwd), req.Query, req.Prefix, req.Limit)
 		reply(w, hits, err)
 	})
 	mux.HandleFunc("POST /archive", func(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +219,18 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 		reply(w, Tail{Items: items, Next: next}, err)
 	})
 	return mux
+}
+
+// requestProject is the project a request names. A client from before projects names none: the project of its cwd when
+// it sends one, else the global notes. The MCP server sends its own.
+func requestProject(_ context.Context, st *store.Store, name, cwd string) string {
+	switch {
+	case strings.TrimSpace(name) != "":
+		return name
+	case cwd != "":
+		return project.FromCwd(cwd, st).Key
+	}
+	return store.GlobalProject
 }
 
 // kvRead is a read with its edges: the keys linked to LinkedTo join the named ones, and Follow 1 hangs each key's
