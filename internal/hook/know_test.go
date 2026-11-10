@@ -430,3 +430,27 @@ func TestACommandTurnIsNotAudited(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// The transcript tail can still end in the previous turn (an injected prompt is a meta entry the walk passes over): the
+// prompt the hook was given is the authority on which turn just ended.
+func TestASkippedTurnLeavesNoMissEvenWhenTheTranscriptStillEndsInThePreviousTurn(t *testing.T) {
+	r := newRig(t)
+	r.kv("hook/check/skip/1", "run the nightly")
+	tp := r.transcript(userLine, editLine)
+	for name, prompt := range map[string]string{
+		"reminder":     "<system-reminder>the date changed</system-reminder>",
+		"notification": "<task-notification>job done</task-notification>",
+		"user skip":    "run the nightly sweep",
+	} {
+		r.stop("s1", tp)
+		if got, _ := r.prompt("s1", "a real prompt to see the miss", tp); !strings.Contains(got, "last turn missed") {
+			t.Fatalf("%s: setup: the miss was not shown: %q", name, got)
+		}
+		r.stop("s1", tp)
+		r.prompt("s1", prompt, tp)
+		r.stop("s1", tp) // the skipped turn ends with the old turn at the transcript's tail
+		if got, _ := r.prompt("s1", "and the next prompt please", tp); strings.Contains(got, "last turn missed") {
+			t.Fatalf("%s: the skipped turn left the previous miss: %q", name, got)
+		}
+	}
+}

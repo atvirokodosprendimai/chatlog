@@ -94,13 +94,17 @@ func Short(prompt string) bool {
 	return len(strings.Fields(prompt)) <= 6 || strings.Contains(prompt, ";)") || strings.Contains(prompt, ":D")
 }
 
+// Skipped says whether a prompt is not the person's, or a hook/check/skip/<n> note says it is not audited.
+func (r Rules) Skipped(prompt string) bool {
+	p := strings.TrimSpace(prompt)
+	return slices.ContainsFunc(slices.Concat(builtinSkip, r.Skip), func(pre string) bool { return pre != "" && strings.HasPrefix(p, pre) })
+}
+
 // Audit returns what the turn missed, one line each; none when it is clean or when the prompt is not audited.
 func Audit(t Turn, r Rules) []string {
 	p := strings.TrimSpace(t.Prompt)
-	for _, pre := range slices.Concat(builtinSkip, r.Skip) {
-		if pre != "" && strings.HasPrefix(p, pre) {
-			return nil
-		}
+	if r.Skipped(p) {
+		return nil
 	}
 	var miss []string
 	changed, wrote, recalled := map[string]int{}, false, false

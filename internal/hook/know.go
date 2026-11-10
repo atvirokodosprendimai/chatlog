@@ -166,6 +166,11 @@ func (d Deps) check(ctx context.Context, in Input) error {
 	}
 	rules, _ := know.ParseRules(kvs)
 	missed := know.Missed(know.Audit(turn, rules))
+	// the transcript's tail can still end in an earlier turn (an injected prompt is a meta entry the walk passes over):
+	// the prompt this session's hook was given last says which turn just ended
+	if p, ok, err := d.Store.LastInput(ctx, in.SessionID, "UserPromptSubmit"); err == nil && ok && rules.Skipped(p) {
+		missed = ""
+	}
 	if missed == "" {
 		// a miss not yet shown is superseded by this clean turn
 		if prev, ok, err := d.Store.LastInput(ctx, in.SessionID, EventCheck); err != nil || !ok || prev == "" {
