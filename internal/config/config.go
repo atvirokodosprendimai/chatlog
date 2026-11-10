@@ -35,21 +35,28 @@ type Hooks struct {
 	Off           []string `json:"off,omitempty"`             // pieces turned off, of Pieces
 	MaxFieldBytes int      `json:"max_field_bytes,omitempty"` // cap of a stored prompt, tool input or tool output; default DefaultMaxField
 	WakeBytes     int      `json:"wake_bytes,omitempty"`      // cap of the digest injected at session start; default DefaultWakeBytes
+	ContextWindow int      `json:"context_window,omitempty"`  // tokens of the model's context, for the meter; default DefaultContextWindow
+	Sleep         float64  `json:"sleep,omitempty"`           // share of the window at which the meter says to sleep (0..1); default DefaultSleep
 }
 
 // The pieces Hooks.Off may name.
 const (
-	PieceTime   = "time"   // the clock injected at each prompt and tool result
-	PieceTools  = "tools"  // a row per tool call
-	PieceIngest = "ingest" // the transcript pushed into the history at each turn's end
-	PieceRecall = "recall" // the recovery digest injected at session start
+	PieceTime    = "time"    // the clock injected at each prompt and tool result
+	PieceTools   = "tools"   // a row per tool call
+	PieceIngest  = "ingest"  // the transcript pushed into the history at each turn's end
+	PieceRecall  = "recall"  // the recovery digest injected at session start
+	PieceNotes   = "notes"   // the always-on lines: every note under hook/prompt/, at each prompt
+	PieceCheck   = "check"   // the last turn audited at its end, what it missed printed at the next prompt
+	PieceContext = "context" // the context meter at each prompt
+	PiecePrompt  = "prompt"  // notes found by the prompt's words, and the situations they name
+	PieceKarma   = "karma"   // a tool call that fits a situation's signature brings the situation, before the call
 )
 
 // Pieces lists them, for validation and messages.
-var Pieces = []string{PieceTime, PieceTools, PieceIngest, PieceRecall}
+var Pieces = []string{PieceTime, PieceTools, PieceIngest, PieceRecall, PieceNotes, PiecePrompt, PieceKarma, PieceCheck, PieceContext}
 
 // keys is what config.json may hold, for the message that refuses another key.
-const keys = `sources, since, tei, reranker, timezone, hooks {off, max_field_bytes, wake_bytes}`
+const keys = `sources, since, tei, reranker, timezone, hooks {off, max_field_bytes, wake_bytes, context_window, sleep}`
 
 const (
 	// DefaultMaxField is the default cap of a stored field, in bytes.
@@ -58,6 +65,11 @@ const (
 	// 40 notes and a dozen turns with their tool calls, small against a 200k-token window; the digest says how to fetch
 	// the rest.
 	DefaultWakeBytes = 24000
+	// DefaultContextWindow is the standard Claude Code context, in tokens; a larger model's is set in hooks.context_window.
+	DefaultContextWindow = 200_000
+	// DefaultSleep is the share of the window at which the meter says to write the pointers down and sleep: early enough
+	// that there is room to do it well, before an automatic compaction decides for the session.
+	DefaultSleep = 0.60
 )
 
 // On says whether a piece is on.
@@ -77,6 +89,22 @@ func (h Hooks) Wake() int {
 		return h.WakeBytes
 	}
 	return DefaultWakeBytes
+}
+
+// Window is the context size the meter counts against.
+func (h Hooks) Window() int {
+	if h.ContextWindow > 0 {
+		return h.ContextWindow
+	}
+	return DefaultContextWindow
+}
+
+// SleepShare is the share of the window at which the meter says to sleep.
+func (h Hooks) SleepShare() float64 {
+	if h.Sleep > 0 {
+		return h.Sleep
+	}
+	return DefaultSleep
 }
 
 // Location is the zone of the local time hooks inject.
@@ -115,6 +143,9 @@ func Load() (File, error) {
 		if !slices.Contains(Pieces, p) {
 			return File{}, fmt.Errorf("%s: hooks.off names %q, which is not a piece; the pieces: %s", Path(), p, strings.Join(Pieces, ", "))
 		}
+	}
+	if h := f.Hooks; h.ContextWindow < 0 || h.Sleep < 0 || h.Sleep > 1 {
+		return File{}, fmt.Errorf("%s: hooks.context_window is tokens (positive) and hooks.sleep a share of it between 0 and 1", Path())
 	}
 	for i, s := range f.Sources { // a shell would expand ~; JSON does not
 		if s == "~" || strings.HasPrefix(s, "~/") {

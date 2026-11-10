@@ -45,6 +45,7 @@ How to use chatlog (rules):
   6. A value is a pointer, not the payload: "WAIT user: release notes draft -> chat:1234", under 200 bytes.
   7. Keys by kind: now/ state (goes stale in 12 h), waits/ what waits on the user, rule/ the user's rules with date, tool/ how a tool is used, fact/ true until changed.
   8. Relate notes with kv_link, not "-> X" inside a value.
+  9. The hooks apply rules kept in kv (hook/prompt/, sit/<g>, sit/<g>/sig|words/<n>, hook/check/rule/<n>): a new rule is a kv_write; ` + "`chatlog instructions`" + ` has the shapes.
 `
 
 // Serve runs until stdin closes.

@@ -124,6 +124,25 @@ func (s *Store) LastEvent(ctx context.Context, session, event string) (at time.T
 	return at, err == nil, err
 }
 
+// LastInput is the input of a session's latest record of that event; ok is false when it has none.
+func (s *Store) LastInput(ctx context.Context, session, event string) (input string, ok bool, err error) {
+	err = s.r.QueryRowContext(ctx, `SELECT input FROM events WHERE session=? AND event=? ORDER BY id DESC LIMIT 1`, session, event).Scan(&input)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return input, err == nil, err
+}
+
+// HasEvent says whether a session holds a record of that event with exactly that input.
+func (s *Store) HasEvent(ctx context.Context, session, event, input string) (bool, error) {
+	var one int
+	err := s.r.QueryRowContext(ctx, `SELECT 1 FROM events WHERE session=? AND event=? AND input=? LIMIT 1`, session, event, input).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // Events returns the latest n records, of one session when session is not empty, oldest first.
 func (s *Store) Events(ctx context.Context, session string, n int) ([]Event, error) {
 	rows, err := s.r.QueryContext(ctx, `SELECT * FROM (SELECT id, `+eventCols+`

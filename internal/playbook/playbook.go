@@ -51,4 +51,9 @@ var Seed = []Note{
 	{"tool/recall", "recall: words said -> chat_search; own notes -> kv_read prefixes / kv_search; whole exchange -> chat_get id; the day before -> chat_tail back with next_before (seed " + SeedDate + ")"},
 	{"tool/wake", "after compaction/clear/start the hook injects a digest (chatlog wake --kind compact|clear|start): notes + recent turns with tool calls; fetch more with the calls it names (seed " + SeedDate + ")"},
 	{"legend/shelves", "kv prefixes: now/ state | waits/ on the user | task/open|done/ | rule/ the user's rules | known/ bugs, gaps | fact/ checked | tool/ how a tool is used | day/ thread/ (seed " + SeedDate + ")"},
+	{"hook/prompt/01", "EXAMPLE of an always-on line: every key under hook/prompt/ is printed with each prompt; replace this value with your own rule, or del the key (seed " + SeedDate + ")"},
+	{"sit/ask-first", "EXAMPLE situation: a force push, a drop or an rm -rf | stop, say what it will touch, and wait for the user's word (seed " + SeedDate + ")"},
+	{"sit/ask-first/sig/1", `Bash :: git +push .*(--force|-f\b)|\brm +-rf\b|\bdrop +(table|database)\b`},
+	{"sit/ask-first/words/1", `force.?push|\bdrop +(the +)?(table|database)\b|\brm +-rf\b`},
+	{"hook/check/rule/01", `Bash :: (^|[|;&]\s*)(cat|head|tail)\s+[^|;&]*\.(go|py|js|ts|md|ya?ml|json)\b :: a file was read through the shell: use the file-reading tool (an example rule; edit or del it)`},
 }

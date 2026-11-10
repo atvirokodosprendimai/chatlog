@@ -78,6 +78,20 @@ Notes in detail (kv_*):
   edges    kv_link add [{s, p, o}]: p one of affects, blocked_by, fixed_by, decided_by, applies_to,
            supersedes, see_also; o a key or a pointer (<repo>@<sha>, chat:<id>, file:line, a URL)
   find     kv_read keys/prefixes when you know the key; kv_search query when you know only the subject
+
+Knowledge in kv (the hooks apply these notes; a new rule is a kv_write, never a code change):
+  hook/prompt/<n>          one line, printed with every prompt: "use the file tool for every file read"
+  sit/<g>                  "what | move", printed when the situation fires
+  sit/<g>/words/<n>        a regex over the prompt (case-insensitive): a match fires sit/<g>
+  sit/<g>/sig/<n>          "TOOLRX :: INRX": TOOLRX matches the whole tool name, INRX the Bash command (else the input's
+                           JSON), per line, case-insensitive: a match fires sit/<g> before the call
+  kv_link rule applies_to sit/<g>   the rule's key is printed with the situation; legend/lib/<n> linked the same way
+                           prints every lib/<n>/* once a session
+  hook/check/rule/<n>      "TOOLRX :: INRX :: message": a turn that made such a call is told message at the next prompt
+  hook/check/change/<n>    a regex over Bash commands that counts as a state change (with no kv_write: a miss)
+  hook/check/bare, hook/check/skip/<n>   answers that need no recall (comma list), prompt prefixes not audited
+  patterns are Go RE2 (no lookahead); one that does not read is named at the next prompt; chatlog events lists the
+  situations that fired (event Karma). The meter: config hooks.context_window, hooks.sleep (default 0.6).
 `
 
 func dataDir(cmd *cli.Command) string { return cmd.String("data-dir") }

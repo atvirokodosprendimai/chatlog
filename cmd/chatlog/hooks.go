@@ -13,6 +13,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/atvirokodosprendimai/chatlog/internal/api"
 	"github.com/atvirokodosprendimai/chatlog/internal/chunk"
 	"github.com/atvirokodosprendimai/chatlog/internal/config"
 	"github.com/atvirokodosprendimai/chatlog/internal/hook"
@@ -53,7 +54,12 @@ func hookCmd(cfg config.File, cfgErr error) *cli.Command {
 			}
 			defer st.Close()
 			spool := filepath.Join(dir, "spool.jsonl")
-			if err := hook.Run(ctx, cmd.Args().First(), os.Stdin, os.Stdout, hook.Deps{Store: st, Config: cfg, Now: time.Now, Spool: spool}); err != nil {
+			// the notes' search by meaning needs the server's embedder; a server that is not running is not started for a hook
+			client := api.NewClient(socketPath(cmd))
+			recall := func(ctx context.Context, q string, limit int) ([]search.KVHit, error) {
+				return client.KVSearch(ctx, api.KVSearchRequest{Query: q, Limit: limit})
+			}
+			if err := hook.Run(ctx, cmd.Args().First(), os.Stdin, os.Stdout, hook.Deps{Store: st, Config: cfg, Now: time.Now, Spool: spool, Recall: recall}); err != nil {
 				hook.Log(dir, time.Now(), "hook %s: %v", cmd.Args().First(), err)
 			}
 			return nil

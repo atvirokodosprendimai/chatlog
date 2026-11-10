@@ -61,6 +61,8 @@ type Deps struct {
 	Config config.File
 	Now    func() time.Time
 	Spool  string // a file for records the database refused (locked past the wait); the next hook writes them; "" drops them
+	// Recall finds notes by meaning through the server's embedder; nil: no such search (the other pieces do not need it)
+	Recall func(ctx context.Context, query string, limit int) ([]search.KVHit, error)
 }
 
 // record writes one row; when the database refuses it the row goes to the spool, so a lock held longer than a hook may
@@ -166,17 +168,26 @@ func Handle(ctx context.Context, in Input, d Deps) (string, error) {
 	case "UserPromptSubmit":
 		prev, ok, err := d.Store.LastEvent(ctx, in.SessionID, in.Event)
 		errs = append(errs, err)
+		var parts []string
 		if h.On(config.PieceTime) {
-			text = clock(now, d.Config.Location(), prev, ok) + " | " + playbook.FirstLine
+			parts = append(parts, clock(now, d.Config.Location(), prev, ok)+" | "+playbook.FirstLine)
 		}
+		more, kerrs := d.promptParts(ctx, in)
+		text = strings.Join(append(parts, more...), "\n")
+		errs = append(errs, kerrs...)
 		ev.Input = Field(in.Prompt, h.Max())
 	case "PreToolUse":
-		if !h.On(config.PieceTools) {
-			return "", errors.Join(errs...)
-		}
-		ev.Tool, ev.ToolUseID, ev.Input = in.ToolName, in.ToolUseID, inputField(in.ToolInput, h.Max())
 		// the call is not in the transcript yet, and this hook must stay the cheapest: no ingest
-		return "", errors.Join(append(errs, d.record(ctx, ev))...)
+		if h.On(config.PieceTools) {
+			ev.Tool, ev.ToolUseID, ev.Input = in.ToolName, in.ToolUseID, inputField(in.ToolInput, h.Max())
+			errs = append(errs, d.record(ctx, ev))
+		}
+		if h.On(config.PieceKarma) {
+			var err error
+			text, err = d.karma(ctx, in)
+			errs = append(errs, err)
+		}
+		return text, errors.Join(errs...)
 	case "PostToolUse":
 		out := outputField(in.ToolResponse, in.ToolInput, h.Max())
 		var start time.Time
@@ -203,7 +214,11 @@ func Handle(ctx context.Context, in Input, d Deps) (string, error) {
 		ev.Input = in.Trigger
 	case "SessionEnd":
 		ev.Input = in.Reason
-	case "Stop", "SubagentStop":
+	case "Stop":
+		if h.On(config.PieceCheck) {
+			errs = append(errs, d.check(ctx, in))
+		}
+	case "SubagentStop":
 	default:
 		return "", fmt.Errorf("unknown hook event %q", in.Event)
 	}
