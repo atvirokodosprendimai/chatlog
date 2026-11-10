@@ -47,6 +47,7 @@ type KVReadRequest struct {
 	At       string   `json:"at,omitempty"`
 	LinkedTo string   `json:"linked_to,omitempty"`
 	Follow   int      `json:"follow,omitempty"`
+	Stale    int      `json:"stale,omitempty"` // 1 returns only the keys that are stale
 }
 
 // KVWriteRequest sets and deletes keys in one transaction.
@@ -239,6 +240,9 @@ func kvRead(ctx context.Context, st *store.Store, req KVReadRequest, at time.Tim
 	if req.Follow != 0 && req.Follow != 1 {
 		return nil, fmt.Errorf("%w: follow is 0 or 1", store.ErrRefused)
 	}
+	if req.Stale != 0 && req.Stale != 1 {
+		return nil, fmt.Errorf("%w: stale is 0 or 1", store.ErrRefused)
+	}
 	keys := req.Keys
 	if req.LinkedTo != "" {
 		subj, err := st.KVLinkedTo(ctx, req.Project, req.LinkedTo, at)
@@ -251,6 +255,9 @@ func kvRead(ctx context.Context, st *store.Store, req KVReadRequest, at time.Tim
 		keys = append(slices.Clone(keys), subj...)
 	}
 	kv, err := st.KVRead(ctx, req.Project, keys, req.Prefixes, at)
+	if req.Stale == 1 {
+		kv = slices.DeleteFunc(kv, func(e store.KV) bool { return !e.Stale })
+	}
 	if err != nil || req.Follow == 0 {
 		return kv, err
 	}

@@ -161,3 +161,20 @@ func TestArchiveFlipAcrossTheSocket(t *testing.T) {
 		t.Fatalf("%d %s", code, body)
 	}
 }
+
+func TestKVReadStaleOneReturnsOnlyTheStaleKeys(t *testing.T) {
+	srv, st := server(t)
+	st.KVWrite(context.Background(), "p", map[string]string{"now/a": "x", "waits/b": "y", "fact/c": "z"}, nil)
+	later := time.Now().Add(store.KVStaleAfter + time.Hour).UTC().Format(time.RFC3339) // read as they stand then: now/ and waits/ went stale
+	code, body := post(t, srv, "/kv/read", `{"project":"p","prefixes":[""],"at":"`+later+`","stale":1}`)
+	var got []store.KV
+	if err := json.Unmarshal([]byte(body), &got); err != nil || code != 200 || len(got) != 2 || got[0].Key != "now/a" || got[1].Key != "waits/b" {
+		t.Fatalf("%d %s %v", code, body, err)
+	}
+	if _, body = post(t, srv, "/kv/read", `{"project":"p","prefixes":[""],"at":"`+later+`"}`); strings.Count(body, `"key"`) != 3 {
+		t.Fatalf("without stale every key: %s", body)
+	}
+	if code, _ = post(t, srv, "/kv/read", `{"project":"p","prefixes":[""],"stale":2}`); code != 400 {
+		t.Fatalf("stale 2: %d", code)
+	}
+}

@@ -127,8 +127,9 @@ func Serve(c *api.Client, version string) error {
 		mcp.WithString("at", mcp.Description("RFC3339: the notes as they stood then")),
 		mcp.WithString("linked_to", mcp.Description("an object: a key or a pointer, e.g. repo/webshop, webshop@0074db3")),
 		mcp.WithNumber("follow", mcp.Description("1 lists each key's edges one hop out and in; default 0")),
+		mcp.WithNumber("stale", mcp.Description("1 returns only the stale keys (now/ and waits/ older than 12h); default 0")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return jsonResult(c.KVRead(ctx, api.KVReadRequest{Project: r.GetString("project", here.Key), Keys: r.GetStringSlice("keys", nil), Prefixes: r.GetStringSlice("prefixes", nil), At: r.GetString("at", ""), LinkedTo: r.GetString("linked_to", ""), Follow: r.GetInt("follow", 0)}))
+		return jsonResult(c.KVRead(ctx, api.KVReadRequest{Project: r.GetString("project", here.Key), Keys: r.GetStringSlice("keys", nil), Prefixes: r.GetStringSlice("prefixes", nil), At: r.GetString("at", ""), LinkedTo: r.GetString("linked_to", ""), Follow: r.GetInt("follow", 0), Stale: r.GetInt("stale", 0)}))
 	})
 	s.AddTool(mcp.NewTool("kv_search",
 		mcp.WithReadOnlyHintAnnotation(true),
