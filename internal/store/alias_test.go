@@ -116,3 +116,33 @@ func TestEveryNameOfAProjectReadsItsTailAndFindsItsExchanges(t *testing.T) {
 		t.Error("a plain word is no project: a search reads it as part of a path")
 	}
 }
+
+// Every project `project ls` lists is named by the short sha it prints, in any of the forms a person types it: whatever
+// the rows that hold the key (notes only, exchanges only, an alias only), with or without brackets, in any case.
+func TestTheShortShaTheListingShowsNamesTheProjectEverywhere(t *testing.T) {
+	ctx, s := context.Background(), open(t)
+	putKeyed(t, s, keyA, "app", 1, "a1")                         // exchanges and an alias
+	const notesOnly = "095355b00000000000000000000000000000000c" // the case of the report: digits first
+	const aliasOnly = "1234567000000000000000000000000000000000"
+	if _, err := s.KVWrite(ctx, notesOnly, map[string]string{"fact/x": "v"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.w.ExecContext(ctx, `INSERT INTO project_alias(alias, key) VALUES('lonely', ?)`, aliasOnly); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := s.Projects(ctx)
+	if err != nil || len(ps) != 3 {
+		t.Fatalf("%+v %v", ps, err)
+	}
+	for _, p := range ps {
+		short := strings.Trim(shortKey(p.Key), "[]")
+		for _, form := range []string{short, "[" + short + "]", strings.ToUpper(short), " " + short + " "} {
+			if got, err := s.ResolveProject(ctx, form); err != nil || got != p.Key {
+				t.Errorf("%q -> %q %v, want %s", form, got, err, p.Key)
+			}
+			if err := s.AddAlias(ctx, form, "n"+short); err != nil {
+				t.Errorf("alias %q: %v", form, err)
+			}
+		}
+	}
+}

@@ -54,6 +54,9 @@ func (s *Store) ResolveProject(ctx context.Context, name string) (string, error)
 	if n, ok := strings.CutPrefix(name, "["); ok {
 		name = strings.TrimSuffix(n, "]")
 	}
+	if l := strings.ToLower(name); l != name && hexRE.MatchString(l) {
+		name = l // a short sha typed in capitals
+	}
 	switch name {
 	case "":
 		return "", refuse("a project name is empty: the MCP server sends its own, so restart a session that began before projects existed")
