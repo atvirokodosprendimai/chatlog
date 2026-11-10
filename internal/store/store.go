@@ -225,10 +225,35 @@ func (s *Store) MarkEmbedded(ctx context.Context, items []Pending) error {
 	return tx.Commit()
 }
 
-// Filter narrows a search.
+// The origin of an exchange: whose window it was typed into. A subagent's exchange carries an agent id, the user's own
+// session none, so no column says it. Reads default to main: what agents did must not fill the user's context.
+const (
+	OriginMain     = "main"
+	OriginSubagent = "subagent"
+	OriginAll      = "all"
+)
+
+// ValidOrigin says whether o names an origin to read; "" is main.
+func ValidOrigin(o string) bool {
+	return o == "" || o == OriginMain || o == OriginSubagent || o == OriginAll
+}
+
+// originCond is the condition on e.agent for a read of origin o, "" when it reads every origin.
+func originCond(o string) string {
+	switch o {
+	case OriginAll:
+		return ""
+	case OriginSubagent:
+		return `e.agent <> ''`
+	}
+	return `e.agent = ''`
+}
+
+// Filter narrows a search; Origin is main, subagent or all, empty for main.
 type Filter struct {
-	Since time.Time
-	Repo  string
+	Since  time.Time
+	Repo   string
+	Origin string
 }
 
 func (f Filter) where() (string, []any) {
@@ -241,6 +266,9 @@ func (f Filter) where() (string, []any) {
 	if f.Repo != "" {
 		cond = append(cond, `(e.cwd LIKE ? OR e.project LIKE ?)`)
 		args = append(args, "%"+f.Repo+"%", "%"+f.Repo+"%")
+	}
+	if c := originCond(f.Origin); c != "" {
+		cond = append(cond, c)
 	}
 	return " AND " + strings.Join(cond, " AND "), args
 }

@@ -36,7 +36,7 @@ func wakeCmd(cfg config.File) *cli.Command {
 			p := cmd.String("project")
 			if p == "" {
 				cwd, _ := os.Getwd()
-				p = project.Of(cwd)
+				p = project.Resolve(cwd)
 			}
 			st, err := openStore(cmd, 5*time.Second)
 			if err != nil {

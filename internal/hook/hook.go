@@ -232,7 +232,7 @@ func Handle(ctx context.Context, in Input, d Deps) (string, error) {
 		errs = append(errs, err, push(ctx, d.Store, since, in.TranscriptPath), push(ctx, d.Store, since, in.AgentTranscriptPath))
 	}
 	if in.Event == "SessionStart" && h.On(config.PieceRecall) {
-		digest, err := wake.Digest(ctx, d.Store, wake.KindOf(in.Source), project.Of(in.Cwd), now, h.Wake())
+		digest, err := wake.Digest(ctx, d.Store, wake.KindOf(in.Source), project.Resolve(in.Cwd), now, h.Wake())
 		if err != nil { // the rule still goes in: a session must never start without it
 			digest = playbook.Rule
 		}

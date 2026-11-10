@@ -46,12 +46,13 @@ How to use chatlog (rules):
   7. Keys by kind: now/ state (goes stale in 12 h), waits/ what waits on the user, rule/ the user's rules with date, tool/ how a tool is used, fact/ true until changed.
   8. Relate notes with kv_link, not "-> X" inside a value.
   9. The hooks apply rules kept in kv (hook/prompt/, sit/<g>, sit/<g>/sig|words/<n>, hook/check/rule/<n>): a new rule is a kv_write; ` + "`chatlog instructions`" + ` has the shapes.
+  10. chat_search, chat_tail and the wake digest read the user's own session only: what subagents did is origin=subagent (or all).
 `
 
 // Serve runs until stdin closes.
 func Serve(c *api.Client, version string) error {
 	cwd, _ := os.Getwd() // Claude Code starts the server in the project's directory
-	here := project.Of(cwd)
+	here := project.Resolve(cwd)
 	s := server.NewMCPServer("chatlog", version, server.WithInstructions(Core))
 	s.AddTool(mcp.NewTool("chat_search",
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -60,12 +61,13 @@ func Serve(c *api.Client, version string) error {
 		mcp.WithNumber("limit", mcp.Description("results, default 10")),
 		mcp.WithString("since", mcp.Description("YYYY-MM-DD or RFC3339, only exchanges from then on")),
 		mcp.WithString("repo", mcp.Description("part of a cwd or a project name")),
+		mcp.WithString("origin", mcp.Description("whose window: default the user's own session; subagent (what subagents did) or all")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		q, err := r.RequireString("query")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return jsonResult(c.Search(ctx, search.Request{Query: q, Limit: r.GetInt("limit", 10), Since: r.GetString("since", ""), Repo: r.GetString("repo", "")}))
+		return jsonResult(c.Search(ctx, search.Request{Query: q, Limit: r.GetInt("limit", 10), Since: r.GetString("since", ""), Repo: r.GetString("repo", ""), Origin: r.GetString("origin", "")}))
 	})
 	s.AddTool(mcp.NewTool("chat_get",
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -90,10 +92,11 @@ func Serve(c *api.Client, version string) error {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDescription(what+"Read it back from the end: a project's latest exchanges, oldest first, about `bytes` of text per page. After a compaction or at the start of a session, page back with next_before until you have enough of the day before. An exchange larger than the page is cut; total_bytes says so and chat_get pages it."),
 		mcp.WithString("project", mcp.Description("default "+here+", the project this server was started in")),
+		mcp.WithString("origin", mcp.Description("default the user's own session; subagent or all")),
 		mcp.WithNumber("before", mcp.Description("next_before of the previous page; absent is now")),
 		mcp.WithNumber("bytes", mcp.Description("text per page, default 30000, at most 200000")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return jsonResult(c.Tail(ctx, r.GetString("project", here), int64(r.GetInt("before", 0)), r.GetInt("bytes", api.TailDefault)))
+		return jsonResult(c.Tail(ctx, r.GetString("project", here), r.GetString("origin", ""), int64(r.GetInt("before", 0)), r.GetInt("bytes", api.TailDefault)))
 	})
 	s.AddTool(mcp.NewTool("kv_read",
 		mcp.WithReadOnlyHintAnnotation(true),

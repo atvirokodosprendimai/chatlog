@@ -63,6 +63,8 @@ A container image exists for running the MCP server without installing anything:
 One exchange = your message, then everything the assistant did (text, tool calls with output) up to its answer.
 Project = the base name of the directory the session ran in.
 
+Origin: the exchange typed into a subagent's window is `subagent`, the rest `main` (the user's own session). `chat_search`, `chat_tail` and the wake digest read `main` only, so what agents did never fills the user's context; `origin=subagent` or `all` widens a search or a tail.
+
 **How it is meant to be used** (stores, note keys, value format, tasks as steps, waking up): `docs/playbook.md`.
 
 ## Recall by hand

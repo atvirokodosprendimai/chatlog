@@ -15,12 +15,16 @@ type Tailed struct {
 	TotalBytes int    `json:"total_bytes"` // when larger than len(text), chat_get pages the rest
 }
 
-// Tail returns a project's latest exchanges before the exchange before (0: from now), oldest first, until their texts fill
+// Tail returns a project's latest exchanges of one origin ("" is the user's own session) before the exchange before
+// (0: from now), oldest first, until their texts fill
 // budget bytes: what was said and done before a compaction or the end of a session, read back from the end. next is the
 // before of the page behind it, 0 when nothing is left. The newest exchange always comes, cut to budget when it alone is larger.
-func (s *Store) Tail(ctx context.Context, project string, before int64, budget int) (items []Tailed, next int64, err error) {
+func (s *Store) Tail(ctx context.Context, project, origin string, before int64, budget int) (items []Tailed, next int64, err error) {
 	q := `SELECT ` + rowCols + `, e.text FROM exchanges e WHERE e.project = ?`
 	args := []any{project}
+	if c := originCond(origin); c != "" {
+		q += ` AND ` + c
+	}
 	if before > 0 {
 		q += ` AND (e.time, e.id) < (SELECT time, id FROM exchanges WHERE id = ?)`
 		args = append(args, before)
@@ -63,9 +67,12 @@ func (s *Store) Tail(ctx context.Context, project string, before int64, budget i
 
 // Recent returns a project's latest n exchanges, oldest first, each text cut to its first textMax bytes (the head is
 // where the user's words and the first tool calls are): what a digest needs, without reading megabytes of tool output.
-func (s *Store) Recent(ctx context.Context, project string, n, textMax int) ([]Tailed, error) {
-	rows, err := s.r.QueryContext(ctx, `SELECT `+rowCols+`, substr(e.text, 1, ?), e.text_len FROM exchanges e WHERE e.project = ?
-		ORDER BY e.time DESC, e.id DESC LIMIT ?`, textMax, project, n)
+func (s *Store) Recent(ctx context.Context, project, origin string, n, textMax int) ([]Tailed, error) {
+	q := `SELECT ` + rowCols + `, substr(e.text, 1, ?), e.text_len FROM exchanges e WHERE e.project = ?`
+	if c := originCond(origin); c != "" {
+		q += ` AND ` + c
+	}
+	rows, err := s.r.QueryContext(ctx, q+` ORDER BY e.time DESC, e.id DESC LIMIT ?`, textMax, project, n)
 	if err != nil {
 		return nil, err
 	}

@@ -46,7 +46,7 @@ func Main(m *testing.M) int {
 	} {
 		os.Setenv(k, v)
 	}
-	for _, k := range []string{"CHATLOG_DIR", "CHATLOG_CONFIG", "CHATLOG_SOCKET", "CHATLOG_AUTOSTART"} {
+	for _, k := range []string{"CHATLOG_DIR", "CHATLOG_CONFIG", "CHATLOG_SOCKET", "CHATLOG_AUTOSTART", "CHATLOG_PROJECT"} {
 		os.Unsetenv(k)
 	}
 	os.Setenv("CHATLOG_AUTOSTART", "0") // no test starts a background server unless it asks for one

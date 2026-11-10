@@ -84,7 +84,7 @@ func Digest(ctx context.Context, st *store.Store, kind, project string, now time
 
 	oldest := int64(0)
 	if w.exchanges > 0 {
-		recent, err := st.Recent(ctx, project, w.exchanges, 64<<10)
+		recent, err := st.Recent(ctx, project, store.OriginMain, w.exchanges, 64<<10)
 		if err != nil {
 			return "", err
 		}

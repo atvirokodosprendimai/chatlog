@@ -37,14 +37,14 @@ func TestTailPagesBackFromTheEndOldestFirst(t *testing.T) {
 	put(t, s, "webshop", 2, "b2")
 	put(t, s, "webshop", 4, "d4")
 	put(t, s, "other", 5, "x5")
-	items, next, err := s.Tail(ctx, "webshop", 0, 4)
+	items, next, err := s.Tail(ctx, "webshop", "", 0, 4)
 	if err != nil || texts(items) != "c3,d4" || next == 0 {
 		t.Fatalf("the last two, oldest first: %q next %d %v", texts(items), next, err)
 	}
 	if items[0].Words != "" || items[0].TotalBytes != 2 {
 		t.Fatalf("words are in the text, not sent twice: %+v", items[0])
 	}
-	items, next, err = s.Tail(ctx, "webshop", next, 4)
+	items, next, err = s.Tail(ctx, "webshop", "", next, 4)
 	if err != nil || texts(items) != "a1,b2" || next != 0 {
 		t.Fatalf("the page behind, then nothing left: %q next %d %v", texts(items), next, err)
 	}
@@ -53,7 +53,7 @@ func TestTailPagesBackFromTheEndOldestFirst(t *testing.T) {
 func TestTailCutsAnExchangeLargerThanTheBudget(t *testing.T) {
 	ctx, s := context.Background(), open(t)
 	put(t, s, "webshop", 1, "ąąąą")
-	items, _, err := s.Tail(ctx, "webshop", 0, 3)
+	items, _, err := s.Tail(ctx, "webshop", "", 0, 3)
 	if err != nil || len(items) != 1 || items[0].Text != "ą" || items[0].TotalBytes != 8 {
 		t.Fatalf("cut on a rune boundary, its size kept: %+v %v", items, err)
 	}

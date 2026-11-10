@@ -69,6 +69,9 @@ A hit is what was said at that time, not the state now: check it against the cod
 Project = the base name of the session's working directory. Secrets are redacted best-effort, by shape: the data dir is private.
 
 ` + mcpserver.Core + `
+Origin: the exchange typed into a subagent's window is subagent, the rest main (the user's own session). chat_search, chat_tail and the
+wake digest read main only, so what agents did never fills the user's context; origin=subagent or all widens a search or a tail.
+
 Notes in detail (kv_*):
   key      at most 5 segments split by /, no spaces: now/release/build, rule/tests-first, tool/kv-write
   value    ONE line, an instruction and where its payload lies; over 200 bytes kept with a warning,
@@ -376,13 +379,14 @@ func searchCmd() *cli.Command {
 		ArgsUsage: "QUERY",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "since"}, &cli.StringFlag{Name: "repo"},
+			&cli.StringFlag{Name: "origin", Usage: "default the user's own session; subagent or all"},
 			&cli.IntFlag{Name: "limit", Value: 10}, &cli.BoolFlag{Name: "json"},
 			&cli.StringFlag{Name: "mode"}, &cli.StringFlag{Name: "form"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			q := strings.Join(cmd.Args().Slice(), " ")
 			resp, err := api.NewClient(socketPath(cmd)).Search(ctx, search.Request{Query: q, Limit: cmd.Int("limit"),
-				Since: cmd.String("since"), Repo: cmd.String("repo"), Mode: cmd.String("mode"), Form: cmd.String("form")})
+				Since: cmd.String("since"), Repo: cmd.String("repo"), Mode: cmd.String("mode"), Form: cmd.String("form"), Origin: cmd.String("origin")})
 			if err != nil {
 				return err
 			}

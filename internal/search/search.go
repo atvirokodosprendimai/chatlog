@@ -52,12 +52,13 @@ var (
 
 // Request is one search.
 type Request struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
-	Since string `json:"since,omitempty"` // YYYY-MM-DD or RFC3339
-	Repo  string `json:"repo,omitempty"`
-	Mode  string `json:"mode,omitempty"` // eval's handle on the variants
-	Form  string `json:"form,omitempty"`
+	Query  string `json:"query"`
+	Limit  int    `json:"limit,omitempty"`
+	Since  string `json:"since,omitempty"` // YYYY-MM-DD or RFC3339
+	Repo   string `json:"repo,omitempty"`
+	Mode   string `json:"mode,omitempty"` // eval's handle on the variants
+	Form   string `json:"form,omitempty"`
+	Origin string `json:"origin,omitempty"` // "" or main: the user's own session; subagent; all
 }
 
 // Hit is one result. Fetch says how to read the whole exchange.
@@ -241,7 +242,10 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 	if form == "" {
 		form = DefaultForm
 	}
-	f := store.Filter{Since: since, Repo: r.Repo}
+	if !store.ValidOrigin(r.Origin) {
+		return Response{}, fmt.Errorf("origin %q: main, subagent or all", r.Origin)
+	}
+	f := store.Filter{Since: since, Repo: r.Repo, Origin: r.Origin}
 	resp := Response{Mode: mode}
 
 	var vecList, ftsList []int64

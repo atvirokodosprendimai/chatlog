@@ -177,7 +177,11 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 		if budget <= 0 {
 			budget = TailDefault
 		}
-		items, next, err := svc.Store.Tail(r.Context(), q.Get("project"), before, min(budget, TailMax))
+		if !store.ValidOrigin(q.Get("origin")) {
+			http.Error(w, "origin: main, subagent or all", http.StatusBadRequest)
+			return
+		}
+		items, next, err := svc.Store.Tail(r.Context(), q.Get("project"), q.Get("origin"), before, min(budget, TailMax))
 		if items == nil {
 			items = []store.Tailed{} // an empty page is a list, so a reader never has to tell null from nothing
 		}
@@ -373,9 +377,9 @@ func (c *Client) KVSearch(ctx context.Context, r KVSearchRequest) ([]search.KVHi
 	return out, c.do(ctx, http.MethodPost, "/kv/search", r, &out)
 }
 
-// Tail fetches one page of a project's latest exchanges.
-func (c *Client) Tail(ctx context.Context, project string, before int64, bytes int) (Tail, error) {
+// Tail fetches one page of a project's latest exchanges of one origin ("" is the user's own session).
+func (c *Client) Tail(ctx context.Context, project, origin string, before int64, bytes int) (Tail, error) {
 	var out Tail
-	q := url.Values{"project": {project}, "before": {strconv.FormatInt(before, 10)}, "bytes": {strconv.Itoa(bytes)}}
+	q := url.Values{"project": {project}, "origin": {origin}, "before": {strconv.FormatInt(before, 10)}, "bytes": {strconv.Itoa(bytes)}}
 	return out, c.do(ctx, http.MethodGet, "/tail?"+q.Encode(), nil, &out)
 }
