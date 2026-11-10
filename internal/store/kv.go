@@ -142,11 +142,15 @@ func (s *Store) KVWrite(ctx context.Context, project string, set map[string]stri
 			warn = append(warn, fmt.Sprintf("%s: %d bytes, over %d: split it, or point to where it lies", k, n, KVSoft))
 		}
 	}
+	setScopes := map[string]bool{} // where each set key lands: the same key set and deleted under two spellings is still both
+	for k := range set {
+		setScopes[colOf2(project, k)] = true
+	}
 	for _, k := range del {
 		if _, stored := scoped(project, k); kvKey(stored) != nil {
 			return nil, kvKey(stored)
 		}
-		if _, ok := set[k]; ok {
+		if setScopes[colOf2(project, k)] {
 			return nil, refuse("key %q: both set and deleted", k)
 		}
 	}
@@ -327,6 +331,22 @@ func (s *Store) KVMarkEmbedded(ctx context.Context, items []Pending) error {
 // global notes only.
 func (s *Store) KVLatest(ctx context.Context, project string, rids []int64, prefix string) (map[int64]KV, error) {
 	out := map[int64]KV{}
+	for len(rids) > 0 { // a statement binds at most 32766 values
+		n := min(len(rids), 500)
+		got, err := s.kvLatest(ctx, project, rids[:n], prefix)
+		if err != nil {
+			return nil, err
+		}
+		for rid, e := range got {
+			out[rid] = e
+		}
+		rids = rids[n:]
+	}
+	return out, nil
+}
+
+func (s *Store) kvLatest(ctx context.Context, project string, rids []int64, prefix string) (map[int64]KV, error) {
+	out := map[int64]KV{}
 	if len(rids) == 0 {
 		return out, nil
 	}
@@ -389,4 +409,10 @@ func (s *Store) KVHas(ctx context.Context, project string, keys []string) (map[s
 		}
 	}
 	return out, nil
+}
+
+// colOf2 names where a key lands: its project column and its stored key.
+func colOf2(project, key string) string {
+	col, stored := scoped(project, key)
+	return col + "\x00" + stored
 }

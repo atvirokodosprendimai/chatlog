@@ -36,7 +36,7 @@ const (
 const (
 	rrfK           = 60
 	pool           = 50
-	vectorFetch    = 500 // filters are applied after: a wide list keeps them from emptying the pool
+	vectorFetch    = 5000 // filters (archive, origin, project) are applied after: a wide list keeps them from emptying the pool
 	maxRerankBytes = 6000
 	queryEmbedWait = 5 * time.Second
 	rerankWait     = 15 * time.Second

@@ -23,7 +23,20 @@ var addedColumns = []struct{ table, col, ddl string }{
 // an interrupted run leaves the file as it was and a repeat does nothing.
 func migrate(db *sql.DB) error {
 	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil) // the writer pool begins IMMEDIATE: two processes migrating take turns
+	// Looked at without the write lock: a file that is up to date (nearly every open) must not wait for it, or a hook
+	// that gives the lock a second would lose its event whenever the server is writing.
+	missing := false
+	for _, c := range addedColumns {
+		var n int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.col).Scan(&n); err != nil {
+			return err
+		}
+		missing = missing || n == 0
+	}
+	if !missing {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, nil) // the writer pool begins IMMEDIATE: two processes migrating take turns; each column is looked at again under the lock
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -213,5 +214,49 @@ func TestEveryReadAndWriteFormOfAProjectName(t *testing.T) {
 		if got := valuesIn(t, s, name, "now/"); !strings.HasPrefix(got, "now/x=v@") {
 			t.Errorf("%q does not name the project: %q", name, got)
 		}
+	}
+}
+
+func TestSetAndDeleteOfOneGlobalKeyUnderTwoSpellingsIsRefused(t *testing.T) {
+	_, s := context.Background(), open(t)
+	if _, err := s.KVWrite(context.Background(), GlobalProject, map[string]string{"x": "v"}, []string{"global/x"}); !errors.Is(err, ErrRefused) {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestKVLatestTakesMoreRidsThanOneStatementBinds(t *testing.T) {
+	ctx, s := context.Background(), open(t)
+	s.KVWrite(ctx, "alpha", map[string]string{"a": "b"}, nil)
+	rids := make([]int64, 40000)
+	for i := range rids {
+		rids[i] = int64(i + 1)
+	}
+	got, err := s.KVLatest(ctx, "alpha", rids, "")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%d %v", len(got), err)
+	}
+}
+
+// A hook gives the write lock one second: a file that needs no migration must open without asking for it.
+func TestOpeningAnUpToDateFileDoesNotWaitForTheWriteLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	tx, err := s.w.BeginTx(context.Background(), nil) // the lock, as the server holds it while it writes
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	start := time.Now()
+	h, err := OpenWith(path, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("open while another process writes: %v", err)
+	}
+	h.Close()
+	if time.Since(start) > 250*time.Millisecond {
+		t.Fatalf("waited %v", time.Since(start))
 	}
 }

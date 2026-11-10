@@ -43,7 +43,8 @@ var shaRE = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 // gitWait is the longest Resolve waits for git; past it the project is named by its path, and is not cached.
 const gitWait = 2 * time.Second
 
-var memo sync.Map // root -> key, for the life of the process
+var memo sync.Map   // root -> key, for the life of the process
+var failed sync.Map // root -> when git last failed to name its root commit
 
 // Resolve names the project of a call: the override, else the project of the cwd.
 func Resolve(cwd string, c Cache) ID {
@@ -73,12 +74,17 @@ func FromCwd(cwd string, c Cache) ID {
 			return id
 		}
 	}
+	if t, ok := failed.Load(root); ok && time.Since(t.(time.Time)) < time.Minute {
+		return id // git did not answer a moment ago: not again at every call of this process
+	}
 	if k, err := RootCommit(root); err == nil {
 		memo.Store(root, k)
 		if c != nil {
 			c.PutRootKey(root, k)
 		}
 		id.Key = k
+	} else {
+		failed.Store(root, time.Now())
 	}
 	return id
 }

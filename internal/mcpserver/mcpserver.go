@@ -71,7 +71,7 @@ func Serve(c *api.Client, version string) error {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return jsonResult(c.Search(ctx, search.Request{Query: q, Limit: r.GetInt("limit", 10), Since: r.GetString("since", ""), Repo: r.GetString("repo", ""), Origin: r.GetString("origin", "")}))
+		return jsonResult(c.Search(ctx, search.Request{Query: q, Limit: r.GetInt("limit", 10), Since: r.GetString("since", ""), Repo: r.GetString("repo", ""), Origin: r.GetString("origin", ""), Archive: r.GetBool("archive", false)}))
 	})
 	s.AddTool(mcp.NewTool("chat_get",
 		mcp.WithReadOnlyHintAnnotation(true),
