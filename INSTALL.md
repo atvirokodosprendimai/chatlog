@@ -125,6 +125,8 @@ server must be stopped) and `rm -r ~/.claude/projects/-tmp-smoke`.
 - Search by meaning needs a TEI embedder: set `"tei"` (and `"reranker"`) in `~/.config/chatlog/config.json`; without it
   search is full-text only and says so in `degraded`.
 - Turn pieces off with `"hooks": {"off": [...]}` in the same file (README.md, Configuration).
+- The hooks also apply rules kept in your notes (always-on lines, situations that fire on a prompt or a tool call, checks
+  of the last turn, a context meter): `chatlog seed` writes an example of each; README.md, "Knowledge in kv".
 
 ## Roll back
 

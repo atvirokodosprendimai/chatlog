@@ -94,14 +94,33 @@ does not run is named in `degraded`. `chatlog eval FILE` scores the variants on 
   "tei": "http://127.0.0.1:8080",
   "reranker": "http://127.0.0.1:8081",
   "timezone": "Europe/Paris",
-  "hooks": {"off": ["time", "tools", "ingest", "recall"], "max_field_bytes": 2000, "wake_bytes": 24000}
+  "hooks": {"off": ["time", "tools", "ingest", "recall"], "max_field_bytes": 2000, "wake_bytes": 24000, "context_window": 200000, "sleep": 0.6}
 }
 ```
 
 `since` empty (the default) reads the whole existing history on the first `ingest --all`. `hooks.off` turns pieces off:
 `time` (the injected clock), `tools` (tool call records), `ingest` (the transcript pushed at turn end), `recall` (the
-session-start digest). Environment: `CHATLOG_DIR` (data dir), `CHATLOG_SOCKET`, `CHATLOG_CONFIG`,
+session-start digest), and the knowledge pieces `notes`, `prompt`, `karma`, `check`, `context` (below). `hooks.context_window`
+(tokens of your model's context, default 200000) and `hooks.sleep` (the share of it at which the meter says to sleep,
+default 0.6) tune the `context` piece. Environment: `CHATLOG_DIR` (data dir), `CHATLOG_SOCKET`, `CHATLOG_CONFIG`,
 `CHATLOG_AUTOSTART=0`.
+
+## Knowledge in kv
+
+The hooks apply rules you keep in the notes; a new rule is a `kv_write`, not a code change. Key shapes, one example each
+(the long form is docs/playbook.md, "Knowledge in kv"; `chatlog seed` writes a starter of each):
+
+| Key | Example value | Does |
+|---|---|---|
+| `hook/prompt/01` | `use the file tool, not cat, for every file read` | printed with every prompt |
+| `sit/ask-first` | `a force push \| stop and ask first` | the situation: what \| move |
+| `sit/ask-first/words/1` | `force.?push` | a prompt that matches brings the situation |
+| `sit/ask-first/sig/1` | `Bash :: git +push .*--force` | a tool call that matches (`TOOLRX :: INRX`) brings it, before the call; keys linked to `sit/ask-first` (`kv_link ... applies_to`) come with it, `lib/<n>/*` once a session |
+| `hook/check/rule/01` | `Bash :: ^cat\s+\S+\.go :: file read through the shell` | the turn that ends with such a call is told so at the next prompt |
+
+Also built in: a state change with no `kv_write`, and a short prompt answered with no `chat_search`/`kv_search`/`kv_read`,
+are named at the next prompt; every prompt carries a context meter and, past `hooks.sleep`, `SLEEP NOW`. A situation is a
+cause and its consequence, not a list of faults: it is whatever you want to happen when that prompt or tool call does.
 
 ## Privacy
 

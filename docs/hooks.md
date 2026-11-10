@@ -14,10 +14,10 @@ a `…[+N bytes]` marker. `chatlog events` shows the records; `hooks.off` in `co
 | Event | Records (table `events`) | Injects | Pushes the transcript | Cost, measured |
 |---|---|---|---|---|
 | SessionStart | a row with `source` (startup, resume, clear, compact) | `recall`: the wake digest (`chatlog wake --kind compact` after a compaction, `clear` after /clear, `start` otherwise): the first-class rule, the notes, the latest exchanges with their tool calls, the fetch calls; capped at `hooks.wake_bytes` (24000) | yes, before the digest is made | ~20 ms + the digest's reads |
-| UserPromptSubmit | a row with the prompt | `time`: `now <UTC> UTC \| <local> <zone> \| previous prompt 3m12s ago \| CHATLOG AND ITS MCP ARE A FIRST CLASS TOOL...` (the rule's first line) | yes: the previous turn closes | ~20 ms, plus the turn's read |
-| PreToolUse | `tools`: opens the call's row: tool name, `tool_use_id`, start, input | nothing | no | ~20 ms |
+| UserPromptSubmit | a row with the prompt | `time`: `now <UTC> UTC \| <local> <zone> \| previous prompt 3m12s ago \| CHATLOG AND ITS MCP ARE A FIRST CLASS TOOL...` (the rule's first line); then `notes` (the `hook/prompt/*` lines), the last turn's misses (`check`), the `context` meter, and `prompt` (notes found by the words, situations the words name) | yes: the previous turn closes | ~20 ms, plus the turn's read; ~60 ms with the search |
+| PreToolUse | `tools`: opens the call's row: tool name, `tool_use_id`, start, input; `karma`: a `Karma` row per situation recognised | `karma`: the situation, its rules by key, a linked library once a session; else nothing | no | ~20 ms; ~40 ms with karma |
 | PostToolUse | `tools`: closes that row: `duration_ms`, output (a row of its own when PreToolUse left none) | `time`: `now <UTC> UTC \| call started HH:MM:SS <zone>, took N.NNN s` | no (see below) | ~20 ms |
-| Stop | a row | nothing | yes: the turn's answer | ~20 ms + the turn's read |
+| Stop | a row; `check`: a `Check` row with what the turn missed | nothing | yes: the turn's answer | ~20 ms + the turn's read |
 | SubagentStop | a row | nothing | yes, and the subagent's own transcript | as Stop |
 | PreCompact | a row with `trigger` (manual, auto) | nothing | yes: nothing is lost to the compaction | as Stop |
 | SessionEnd | a row with `reason` | nothing | yes | as Stop |
@@ -43,3 +43,27 @@ budget records nothing for that event (logged); the transcript ingest at the tur
 
 Costs were measured on Linux with a 27 MB transcript already ingested (wall clock around the whole process, 3 runs each, warm cache); a cold start of the
 binary adds a few ms.
+
+**Knowledge pieces** (`notes`, `prompt`, `karma`, `check`, `context`; the rules live in the notes, see docs/playbook.md,
+"Knowledge in kv"): `notes` and `prompt` and `context` add to the prompt's context, in the order time, notes, last
+turn's misses, context, recall; `karma` adds to `PreToolUse` when a tool call fits a situation's signature (and writes a
+`Karma` row per recognition, a `KarmaLib` row when a library is printed); `check` at `Stop` audits the turn and stores its
+misses in a `Check` row, printed at the next prompt and then cleared by an empty row. Only `prompt`'s search by meaning
+needs the server: the call has a budget of 1.5 s and is skipped, and logged, past it or when the server is down. Measured
+on dc-ocr1 (Linux, 64 cores), wall clock around the whole process, p50 of 40 to 100 runs, a data dir with 3900 notes of
+which 300 situations with a signature each, the server running with an embedder stand-in that answers at once (a real
+embedder adds its own time):
+
+| Run | p50 | p95 |
+|---|---|---|
+| PreToolUse, karma off | 27.6 ms | 30.2 ms |
+| PreToolUse, karma on, no situation fits | 39.1 ms | 42.6 ms |
+| PreToolUse, karma on, one fits | 39.0 ms | 48.5 ms |
+| Stop, check off (ingest off) | 27.5 ms | 29.7 ms |
+| Stop, check on, a 56 MB transcript | 30.1 ms | 32.6 ms |
+| UserPromptSubmit, prompt piece off | 35.7 ms | 44.8 ms |
+| UserPromptSubmit, all pieces, search answered | 59.7 ms | 64.2 ms |
+
+Karma's cost is reading `sit/` and compiling its patterns at each call: about 11 ms at 300 situations, in proportion to
+their number (a team's own library is a few dozen). The check reads the transcript from its end, 128 KB at a time, and
+stops at the last prompt the person typed.

@@ -5,7 +5,8 @@ how notes are written, how a session wakes after a compaction. It is reproducibl
 every session, the skill in Claude Code, and the starter notes in the store (`chatlog seed` alone does the last): the
 rules of this page as `rule/chatlog-first-class`, `rule/recall-first`, `rule/hit-is-past`, `rule/kv-every-step`,
 `rule/task-steps`, `rule/stale`, `rule/value-format`, `tool/kv-write`, `tool/kv-link`, `tool/recall`, `tool/wake`,
-`legend/shelves`.
+`legend/shelves`, and one example of each knowledge rule below (`hook/prompt/01`, `sit/ask-first` with its `sig` and
+`words`, `hook/check/rule/01`).
 
 ```
 CHATLOG AND ITS MCP ARE A FIRST CLASS TOOL. LOSING CONTEXT IS EXPENSIVE. A TOOL CALL IS CHEAPER THAN LOST CONTEXT.
@@ -125,14 +126,59 @@ The session-start hook injects a bounded digest (default 24000 bytes, about 6k t
 After waking: read the digest, follow only the pointers the task needs, say in one line what it changes against the
 summary, then go on. The day before is one `chat_tail` page after another, not a guess.
 
-## An optional pattern: a library of situations
+## Knowledge in kv: rules the hooks apply
 
-A session repeats a few situations many times: about to commit, about to run tests, about to touch production, about
-to brief an agent. A small library maps each situation's signature (the tool and a few words of its input) to its
-**move** (the one thing to do first) and the keys of the rules that apply. A `PreToolUse` hook can match the signature
-and inject `situation: commit | move: run the gate first | rules: rule/commit rule/gate`, and the session reads those
-rules by key. Keep the library in the notes (`sit/<name>` keys, linked with `applies_to` edges to their rules) so it
-grows as lessons come. chatlog does not ship one: the situations and rules are each team's own.
+The hooks do not carry rules of their own; they apply the ones in your notes. A new rule is a `kv_write`, never a code
+change, and what is written is yours: chatlog knows only the key shapes. A *situation* is a plain cause and effect, a
+program: an action (a prompt, a tool call) triggers its consequence (a move and the rules written for it). It need not be a
+mistake to avoid; it is anything you want to happen when that action happens.
+
+| Key | Value | When it speaks | Piece |
+|---|---|---|---|
+| `hook/prompt/<n>` | one line | printed with every prompt, in key order | `notes` |
+| `sit/<g>` | `what \| move` | the situation itself, printed when it fires | |
+| `sit/<g>/words/<n>` | a regex over the prompt (case-insensitive) | a prompt that matches fires `sit/<g>` | `prompt` |
+| `sit/<g>/sig/<n>` | `TOOLRX :: INRX` | a tool call that matches fires `sit/<g>`, before the call runs | `karma` |
+| `kv_link rule/<x> applies_to sit/<g>` | | the rule's key is printed with the situation | |
+| `kv_link legend/lib/<n> applies_to sit/<g>` | the notes `lib/<n>/*` | all of `lib/<n>/*` printed whole, once per session | `karma` |
+| `hook/check/rule/<n>` | `TOOLRX :: INRX :: message` | the turn that ends with a matching call is told `message` at the next prompt | `check` |
+| `hook/check/change/<n>` | a regex over Bash commands | a command that matches counts as a state change | `check` |
+| `hook/check/bare` | a comma list: `ok, status` | short answers that need no recall | `check` |
+| `hook/check/skip/<n>` | a prompt prefix | prompts that start so are not audited | `check` |
+
+- **TOOLRX** must match the whole tool name (`Bash`, `Edit|Write`, `mcp__.*__kv_write`). **INRX** is searched,
+  case-insensitively and per line (`^` and `$` are a line's start and end), in the command itself for `Bash`, in the tool
+  input's JSON for any other tool. Patterns are Go's RE2: no lookahead, no backreference. One that does not compile, or a
+  value in the wrong shape, is left out and named at the next prompt as `kv rules NOT read: <keys>`.
+- **The prompt piece** also searches the notes by meaning with the prompt's words (needs the server's embedder): prompts of
+  3 words or more, the top 3 at score 0.42 or over, `map/` left out. A stale one (`now/`, `waits/` older than 12 h) is
+  flagged `check against the source, then rewrite or delete`. When the server does not answer within 1.5 s the search is
+  skipped and logged in `hooks.log`; the notes and the situations never wait on it.
+- **Each recognition is a row** (`chatlog events`: event `Karma`, tool, input `sit/<g>`), so a situation that never fires
+  can be found and dropped.
+- **The check piece** audits the turn that just ended and never blocks. Built in: a state change (`Edit`, `Write`,
+  `Cron*`, and the Bash commands `hook/check/change/<n>` names) with no `kv_write` in the turn; a short prompt (6 words or
+  fewer, or with `;)` or `:D`) answered with tool calls but no `chat_search`, `kv_search` or `kv_read`. What it found is
+  printed at the next prompt as `last turn missed: ...` and then cleared. Prompts starting `<system-reminder>` or
+  `<task-notification>` are not audited.
+- **The context piece** says in every prompt how much of the window is used (the last main-thread message's input, cache
+  read and cache creation tokens), and from `hooks.sleep` of it (60% by default; the window is `hooks.context_window`,
+  200000 by default) it says `SLEEP NOW`: kv_write the pointers before going on, while there is room to do it well.
+
+One prompt's context comes in this order: time, `hook/prompt/*` lines, last turn's misses, the context line, the notes
+found and the situations the prompt names. Starter notes (`chatlog seed`) write one of each to start from:
+
+```
+kv_write set: {
+  "hook/prompt/01": "use the file tool, not cat, for every file read",
+  "sit/ask-first": "a force push, a drop or an rm -rf | stop, say what it will touch, wait for the user's word",
+  "sit/ask-first/sig/1": "Bash :: git +push .*(--force|-f\\b)|\\brm +-rf\\b",
+  "sit/ask-first/words/1": "force.?push|\\brm +-rf\\b",
+  "hook/check/rule/01": "Bash :: (^|[|;&]\\s*)(cat|head|tail)\\s+[^|;&]*\\.go\\b :: a file was read through the shell"}
+kv_link add: [{s: "rule/hit-is-past", p: "applies_to", o: "sit/ask-first"}]   # its key arrives with the situation
+```
+
+Turn a piece off with `hooks.off` (`notes`, `prompt`, `karma`, `check`, `context`).
 
 ## Privacy, in one paragraph
 
