@@ -12,7 +12,7 @@ import (
 
 func seed(t *testing.T, s *Store, set map[string]string) {
 	t.Helper()
-	if _, err := s.KVWrite(context.Background(), set, nil); err != nil {
+	if _, err := s.KVWrite(context.Background(), "p", set, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -20,7 +20,7 @@ func seed(t *testing.T, s *Store, set map[string]string) {
 func TestKVLinkAddsAndDeletesAndKeepsTheHistory(t *testing.T) {
 	ctx, s := context.Background(), open(t)
 	seed(t, s, map[string]string{"waits/m/image": "WAIT M", "now/jur/api": "STATE live"})
-	if err := s.KVLink(ctx, []Link{
+	if err := s.KVLink(ctx, "p", []Link{
 		{S: "waits/m/image", P: "blocked_by", O: "now/jur/api"},
 		{S: "waits/m/image", P: "applies_to", O: "island/juridiniai"},
 	}, nil); err != nil {
@@ -28,10 +28,10 @@ func TestKVLinkAddsAndDeletesAndKeepsTheHistory(t *testing.T) {
 	}
 	between := time.Now()
 	time.Sleep(2 * time.Millisecond)
-	if err := s.KVLink(ctx, nil, []Link{{S: "waits/m/image", P: "applies_to", O: "island/juridiniai"}}); err != nil {
+	if err := s.KVLink(ctx, "p", nil, []Link{{S: "waits/m/image", P: "applies_to", O: "island/juridiniai"}}); err != nil {
 		t.Fatal(err)
 	}
-	out, in, err := s.KVEdges(ctx, []string{"waits/m/image", "now/jur/api"}, time.Time{})
+	out, in, err := s.KVEdges(ctx, "p", []string{"waits/m/image", "now/jur/api"}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestKVLinkAddsAndDeletesAndKeepsTheHistory(t *testing.T) {
 	if len(in["now/jur/api"]) != 1 || in["now/jur/api"][0] != (Edge{S: "waits/m/image", P: "blocked_by"}) {
 		t.Fatalf("in: %+v", in)
 	}
-	then, _, err := s.KVEdges(ctx, []string{"waits/m/image"}, between)
+	then, _, err := s.KVEdges(ctx, "p", []string{"waits/m/image"}, between)
 	if err != nil || len(then["waits/m/image"]) != 2 {
 		t.Fatalf("before the delete both edges stood: %+v %v", then, err)
 	}
@@ -63,17 +63,17 @@ func TestKVLinkRefusesTheWholeWriteOnOneBadLink(t *testing.T) {
 		"an object with a space":      {S: "fact/a", P: "see_also", O: "a b"},
 	}
 	for name, l := range bad {
-		if err := s.KVLink(ctx, []Link{ok, l}, nil); !errors.Is(err, ErrRefused) {
+		if err := s.KVLink(ctx, "p", []Link{ok, l}, nil); !errors.Is(err, ErrRefused) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	if err := s.KVLink(ctx, []Link{ok}, []Link{ok}); !errors.Is(err, ErrRefused) {
+	if err := s.KVLink(ctx, "p", []Link{ok}, []Link{ok}); !errors.Is(err, ErrRefused) {
 		t.Fatalf("added and deleted at once: %v", err)
 	}
-	if err := s.KVLink(ctx, nil, nil); !errors.Is(err, ErrRefused) {
+	if err := s.KVLink(ctx, "p", nil, nil); !errors.Is(err, ErrRefused) {
 		t.Fatalf("nothing to write: %v", err)
 	}
-	if out, _, _ := s.KVEdges(ctx, []string{"fact/a"}, time.Time{}); len(out) != 0 {
+	if out, _, _ := s.KVEdges(ctx, "p", []string{"fact/a"}, time.Time{}); len(out) != 0 {
 		t.Fatalf("a refused write linked: %+v", out)
 	}
 }
@@ -81,14 +81,14 @@ func TestKVLinkRefusesTheWholeWriteOnOneBadLink(t *testing.T) {
 func TestKVLinkedToNamesTheSubjectsOfAnObject(t *testing.T) {
 	ctx, s := context.Background(), open(t)
 	seed(t, s, map[string]string{"now/jur/api": "x", "waits/m/dns": "y", "fact/other": "z"})
-	if err := s.KVLink(ctx, []Link{
+	if err := s.KVLink(ctx, "p", []Link{
 		{S: "now/jur/api", P: "applies_to", O: "island/juridiniai"},
 		{S: "waits/m/dns", P: "affects", O: "island/juridiniai"},
 		{S: "fact/other", P: "applies_to", O: "island/eurlexlast"},
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.KVLinkedTo(ctx, "island/juridiniai", time.Time{})
+	got, err := s.KVLinkedTo(ctx, "p", "island/juridiniai", time.Time{})
 	if err != nil || len(got) != 2 || got[0] != "now/jur/api" || got[1] != "waits/m/dns" {
 		t.Fatalf("%v %v", got, err)
 	}
@@ -103,7 +103,7 @@ func TestKVReadMarksALiveKeyStalePastTheThreshold(t *testing.T) {
 		}
 	}
 	seed(t, s, map[string]string{"now/fresh": "v"})
-	got, err := s.KVRead(ctx, nil, []string{""}, time.Time{})
+	got, err := s.KVRead(ctx, "p", nil, []string{""}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

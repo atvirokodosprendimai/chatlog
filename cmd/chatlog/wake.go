@@ -33,16 +33,16 @@ func wakeCmd(cfg config.File) *cli.Command {
 			if !slices.Contains(wake.Kinds, cmd.String("kind")) {
 				return fmt.Errorf("--kind: one of %s", strings.Join(wake.Kinds, ", "))
 			}
-			p := cmd.String("project")
-			if p == "" {
-				cwd, _ := os.Getwd()
-				p = project.Resolve(cwd)
-			}
 			st, err := openStore(cmd, 5*time.Second)
 			if err != nil {
 				return err
 			}
 			defer st.Close()
+			p := cmd.String("project")
+			if p == "" {
+				cwd, _ := os.Getwd()
+				p = project.Resolve(cwd, st).Key
+			}
 			d, err := wake.Digest(ctx, st, cmd.String("kind"), p, time.Now(), cmd.Int("bytes"))
 			if err != nil {
 				return err
@@ -56,7 +56,7 @@ func wakeCmd(cfg config.File) *cli.Command {
 func seedCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "seed",
-		Usage: "write the starter notes (the playbook's rules under rule/ tool/ legend/, and one example each of hook/ and sit/) where a key is absent; safe to repeat",
+		Usage: "write the starter notes, global (the playbook's rules under rule/ tool/ legend/, and one example each of hook/ and sit/) where a key is absent; safe to repeat",
 		Flags: []cli.Flag{&cli.BoolFlag{Name: "dry-run", Usage: "list what would be written"}},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			st, err := openStore(cmd, 10*time.Second)
@@ -80,7 +80,7 @@ func seedCmd() *cli.Command {
 			if cmd.Bool("dry-run") {
 				return nil
 			}
-			_, err = st.KVWrite(ctx, set, nil)
+			_, err = st.KVWrite(ctx, store.GlobalProject, set, nil)
 			return err
 		},
 	}
@@ -92,7 +92,7 @@ func missingSeeds(ctx context.Context, st *store.Store) ([]playbook.Note, error)
 	for i, n := range playbook.Seed {
 		keys[i] = n.Key
 	}
-	have, err := st.KVHas(ctx, keys)
+	have, err := st.KVHas(ctx, store.GlobalProject, keys)
 	if err != nil {
 		return nil, err
 	}

@@ -47,12 +47,14 @@ How to use chatlog (rules):
   8. Relate notes with kv_link, not "-> X" inside a value.
   9. The hooks apply rules kept in kv (hook/prompt/, sit/<g>, sit/<g>/sig|words/<n>, hook/check/rule/<n>): a new rule is a kv_write; ` + "`chatlog instructions`" + ` has the shapes.
   10. chat_search, chat_tail and the wake digest read the user's own session only: what subagents did is origin=subagent (or all).
+  11. kv_* act on this project's notes and the global ones; a key under global/ is global; project= names another (an alias, a short sha, a key; * reads all).
 `
 
 // Serve runs until stdin closes.
 func Serve(c *api.Client, version string) error {
-	cwd, _ := os.Getwd() // Claude Code starts the server in the project's directory
-	here := project.Resolve(cwd)
+	cwd, _ := os.Getwd()              // Claude Code starts the server in the project's directory
+	here := project.Resolve(cwd, nil) // the one resolver: chat_tail's default and every kv call's
+	projDesc := "default " + here.Name + ": this project's notes and the global ones; a key written under global/ is global. Another project: its alias, short sha ([526abcd]) or key; \"*\" reads every project and never writes"
 	s := server.NewMCPServer("chatlog", version, server.WithInstructions(Core))
 	s.AddTool(mcp.NewTool("chat_search",
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -91,27 +93,29 @@ func Serve(c *api.Client, version string) error {
 	s.AddTool(mcp.NewTool("chat_tail",
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDescription(what+"Read it back from the end: a project's latest exchanges, oldest first, about `bytes` of text per page. After a compaction or at the start of a session, page back with next_before until you have enough of the day before. An exchange larger than the page is cut; total_bytes says so and chat_get pages it."),
-		mcp.WithString("project", mcp.Description("default "+here+", the project this server was started in")),
+		mcp.WithString("project", mcp.Description("default "+here.Name+", the project this server was started in; an alias, a short sha ([526abcd]) or a key names another")),
 		mcp.WithString("origin", mcp.Description("default the user's own session; subagent or all")),
 		mcp.WithNumber("before", mcp.Description("next_before of the previous page; absent is now")),
 		mcp.WithNumber("bytes", mcp.Description("text per page, default 30000, at most 200000")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return jsonResult(c.Tail(ctx, r.GetString("project", here), r.GetString("origin", ""), int64(r.GetInt("before", 0)), r.GetInt("bytes", api.TailDefault)))
+		return jsonResult(c.Tail(ctx, r.GetString("project", here.Key), r.GetString("origin", ""), int64(r.GetInt("before", 0)), r.GetInt("bytes", api.TailDefault)))
 	})
 	s.AddTool(mcp.NewTool("kv_read",
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDescription("The session's own notes: one short line per key, a pointer into the other stores (chat:<id>, file:line, sha, a URL), never their payload. Read many in one call: each named key and every key under a prefix, its last value, sorted by key; the prefix \"\" is every key. `at` reads them as they stood then. Each key has `age`; a now/ or waits/ key older than 12h has `stale: true`: it was the state then, check it before saying it. follow 1: each key also lists its edges from kv_link, out {p, o} and in {s, p}. linked_to: also read every key linked to that object (\"what applies_to repo/webshop\"); with follow 1 to see how."),
+		mcp.WithString("project", mcp.Description(projDesc)),
 		mcp.WithArray("keys", mcp.WithStringItems(), mcp.Description("exact keys")),
 		mcp.WithArray("prefixes", mcp.WithStringItems(), mcp.Description("key prefixes, e.g. now/; \"\" is every key")),
 		mcp.WithString("at", mcp.Description("RFC3339: the notes as they stood then")),
 		mcp.WithString("linked_to", mcp.Description("an object: a key or a pointer, e.g. repo/webshop, webshop@0074db3")),
 		mcp.WithNumber("follow", mcp.Description("1 lists each key's edges one hop out and in; default 0")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return jsonResult(c.KVRead(ctx, api.KVReadRequest{Keys: r.GetStringSlice("keys", nil), Prefixes: r.GetStringSlice("prefixes", nil), At: r.GetString("at", ""), LinkedTo: r.GetString("linked_to", ""), Follow: r.GetInt("follow", 0)}))
+		return jsonResult(c.KVRead(ctx, api.KVReadRequest{Project: r.GetString("project", here.Key), Keys: r.GetStringSlice("keys", nil), Prefixes: r.GetStringSlice("prefixes", nil), At: r.GetString("at", ""), LinkedTo: r.GetString("linked_to", ""), Follow: r.GetInt("follow", 0)}))
 	})
 	s.AddTool(mcp.NewTool("kv_search",
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDescription("Find the session's own notes by meaning, when the key is not known: each key at its last value, nearest first, with the cosine score (compare within one result only). A note written in the last interval (30 s) may not have its vector yet."),
+		mcp.WithString("project", mcp.Description(projDesc)),
 		mcp.WithString("query", mcp.Required(), mcp.Description("what to find, a subject")),
 		mcp.WithString("prefix", mcp.Description("only keys under it, e.g. fact/")),
 		mcp.WithNumber("limit", mcp.Description("default 10")),
@@ -120,15 +124,16 @@ func Serve(c *api.Client, version string) error {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return jsonResult(c.KVSearch(ctx, api.KVSearchRequest{Query: q, Prefix: r.GetString("prefix", ""), Limit: r.GetInt("limit", 10)}))
+		return jsonResult(c.KVSearch(ctx, api.KVSearchRequest{Project: r.GetString("project", here.Key), Query: q, Prefix: r.GetString("prefix", ""), Limit: r.GetInt("limit", 10)}))
 	})
 	s.AddTool(mcp.NewTool("kv_write",
 		mcp.WithDescription("Write the session's notes, many keys in one transaction: one bad entry writes nothing, and a write never changes an old row (the history stays for kv_read at). A value is ONE line: an instruction and where its payload lies (\"WAIT user: release notes draft -> chat:1234\"). Keep it under 200 bytes: past that it is kept with a warning; past 500 the whole write is refused. A key has at most 5 segments split by /, no spaces."),
+		mcp.WithString("project", mcp.Description(projDesc)),
 		mcp.WithObject("set", mcp.Description("key: value, both strings"), mcp.AdditionalProperties(map[string]any{"type": "string"})),
 		mcp.WithArray("del", mcp.WithStringItems(), mcp.Description("keys to delete")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		for k := range r.GetArguments() {
-			if k != "set" && k != "del" {
+			if k != "set" && k != "del" && k != "project" {
 				return mcp.NewToolResultError("kv_write: unknown argument " + k + `: write set: {"<key>": "<value>"} (and del: [keys])`), nil
 			}
 		}
@@ -141,7 +146,7 @@ func Serve(c *api.Client, version string) error {
 			}
 			set[k] = s
 		}
-		return jsonResult(c.KVWrite(ctx, api.KVWriteRequest{Set: set, Del: r.GetStringSlice("del", nil)}))
+		return jsonResult(c.KVWrite(ctx, api.KVWriteRequest{Project: r.GetString("project", here.Key), Set: set, Del: r.GetStringSlice("del", nil)}))
 	})
 	link := map[string]any{"type": "object", "required": []string{"s", "p", "o"}, "properties": map[string]any{
 		"s": map[string]any{"type": "string", "description": "a key that exists"},
@@ -150,6 +155,7 @@ func Serve(c *api.Client, version string) error {
 	}}
 	s.AddTool(mcp.NewTool("kv_link",
 		mcp.WithDescription("Relate the session's notes, instead of writing \"-> X\" inside a value: many edges s -p-> o in one transaction, one bad edge writes nothing; append-only like kv_write, a delete is a tombstone, so kv_read at sees edges as they stood. p is one of: "+strings.Join(store.KVPredicates, ", ")+". Read them back with kv_read follow 1 (both directions) or linked_to."),
+		mcp.WithString("project", mcp.Description(projDesc)),
 		mcp.WithArray("add", mcp.Description("edges to add"), mcp.Items(link)),
 		mcp.WithArray("del", mcp.Description("edges to delete"), mcp.Items(link)),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -161,7 +167,7 @@ func Serve(c *api.Client, version string) error {
 		if err != nil {
 			return mcp.NewToolResultError("del: " + err.Error()), nil
 		}
-		return jsonResult(c.KVLink(ctx, api.KVLinkRequest{Add: add, Del: del}))
+		return jsonResult(c.KVLink(ctx, api.KVLinkRequest{Project: r.GetString("project", here.Key), Add: add, Del: del}))
 	})
 	return server.ServeStdio(s)
 }

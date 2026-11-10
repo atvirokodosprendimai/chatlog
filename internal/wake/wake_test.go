@@ -43,7 +43,7 @@ func session(t *testing.T) *store.Store {
 	if err := (&ingest.Ingester{Store: st, Limit: chunk.DefaultLimit}).File(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.KVWrite(context.Background(), map[string]string{"now/release": "STATE building v2", "task/open/1-docs": "1/3 done: next INSTALL.md", "fact/x": "not in a clear"}, nil); err != nil {
+	if _, err := st.KVWrite(context.Background(), "webshop", map[string]string{"now/release": "STATE building v2", "task/open/1-docs": "1/3 done: next INSTALL.md", "fact/x": "not in a clear"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	return st

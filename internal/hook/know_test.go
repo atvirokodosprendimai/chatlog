@@ -24,14 +24,14 @@ func (r *rig) kv(pairs ...string) {
 	for i := 0; i < len(pairs); i += 2 {
 		set[pairs[i]] = pairs[i+1]
 	}
-	if _, err := r.d.Store.KVWrite(context.Background(), set, nil); err != nil {
+	if _, err := r.d.Store.KVWrite(context.Background(), "unknown", set, nil); err != nil {
 		r.t.Fatal(err)
 	}
 }
 
 func (r *rig) link(s, o string) {
 	r.t.Helper()
-	if err := r.d.Store.KVLink(context.Background(), []store.Link{{S: s, P: "applies_to", O: o}}, nil); err != nil {
+	if err := r.d.Store.KVLink(context.Background(), "unknown", []store.Link{{S: s, P: "applies_to", O: o}}, nil); err != nil {
 		r.t.Fatal(err)
 	}
 }
@@ -84,7 +84,7 @@ func TestPromptPartsComeInTheirOrder(t *testing.T) {
 	r.kv("hook/prompt/02", "second line", "hook/prompt/01", "first line", "sit/rel", "release | check the gate first", "sit/rel/words/1", "release")
 	r.kv("rule/gate", "run the gate first")
 	r.link("rule/gate", "sit/rel")
-	r.d.Recall = func(context.Context, string, int) ([]search.KVHit, error) {
+	r.d.Recall = func(context.Context, string, string, int) ([]search.KVHit, error) {
 		return []search.KVHit{{KV: store.KV{Key: "fact/gate", Value: "the gate is X"}, Score: 0.6}}, nil
 	}
 	tp := r.transcript(userLine, editLine)
@@ -201,7 +201,7 @@ func TestRecallNeedsWordsAndSkipsWhenTheServerDoesNot(t *testing.T) {
 	r := newRig(t)
 	r.kv("sit/g", "what | move", "sit/g/words/1", "gate")
 	calls := 0
-	r.d.Recall = func(ctx context.Context, q string, n int) ([]search.KVHit, error) {
+	r.d.Recall = func(ctx context.Context, _, q string, n int) ([]search.KVHit, error) {
 		calls++
 		return nil, errors.New("the chatlog server does not answer")
 	}
@@ -219,7 +219,7 @@ func TestRecallNeedsWordsAndSkipsWhenTheServerDoesNot(t *testing.T) {
 
 func TestRecallPrintsStaleOnesWithTheCheckLine(t *testing.T) {
 	r := newRig(t)
-	r.d.Recall = func(context.Context, string, int) ([]search.KVHit, error) {
+	r.d.Recall = func(context.Context, string, string, int) ([]search.KVHit, error) {
 		return []search.KVHit{
 			{KV: store.KV{Key: "map/code", Value: "x"}, Score: 0.9},
 			{KV: store.KV{Key: "now/job", Value: "running", Stale: true, Age: "20h"}, Score: 0.5},
@@ -318,7 +318,7 @@ func TestKarmaIgnoresBadSignaturesAndRunsWithoutToolRows(t *testing.T) {
 func TestEachKnowledgePieceTurnsOff(t *testing.T) {
 	setup := func(r *rig) string {
 		r.kv("hook/prompt/01", "always", "sit/g", "what | move", "sit/g/words/1", "gate", "sit/g/sig/1", "Bash :: gate")
-		r.d.Recall = func(context.Context, string, int) ([]search.KVHit, error) {
+		r.d.Recall = func(context.Context, string, string, int) ([]search.KVHit, error) {
 			return []search.KVHit{{KV: store.KV{Key: "fact/gate", Value: "v"}, Score: 0.9}}, nil
 		}
 		tp := r.transcript(userLine, editLine)
@@ -379,7 +379,7 @@ func BenchmarkKarmaNoMatch(b *testing.B) {
 	for i := 0; i < 3000; i++ {
 		set[fmt.Sprintf("note/n%d", i)] = "a note"
 	}
-	if _, err := st.KVWrite(context.Background(), set, nil); err != nil {
+	if _, err := st.KVWrite(context.Background(), "unknown", set, nil); err != nil {
 		b.Fatal(err)
 	}
 	d := Deps{Store: st}
@@ -398,7 +398,7 @@ func TestASlowServerCostsAtMostTheBudget(t *testing.T) {
 	defer func() { recallBudget = old }()
 	r := newRig(t)
 	r.kv("hook/prompt/01", "always", "sit/g", "what | move", "sit/g/words/1", "gate")
-	r.d.Recall = func(ctx context.Context, q string, n int) ([]search.KVHit, error) {
+	r.d.Recall = func(ctx context.Context, _, q string, n int) ([]search.KVHit, error) {
 		<-ctx.Done() // an embedder that never answers
 		return nil, ctx.Err()
 	}

@@ -65,9 +65,10 @@ func Digest(ctx context.Context, st *store.Store, kind, project string, now time
 	// the rule always comes whole: a cap below it and the opening grows to fit them
 	b.max = max(limit, len(playbook.Rule)+len(w.opening)+800)
 	b.add(playbook.Rule)
-	b.add(fmt.Sprintf("\nCHATLOG WAKE (%s), project %q, %s. %s\n", kind, project, now.UTC().Format(time.RFC3339), w.opening))
+	name := st.Label(ctx, project) // the project as people name it: its first alias
+	b.add(fmt.Sprintf("\nCHATLOG WAKE (%s), project %q, %s. %s\n", kind, name, now.UTC().Format(time.RFC3339), w.opening))
 
-	notes, err := st.KVRead(ctx, nil, w.prefixes, time.Time{})
+	notes, err := st.KVRead(ctx, project, nil, w.prefixes, time.Time{})
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +89,7 @@ func Digest(ctx context.Context, st *store.Store, kind, project string, now time
 		if err != nil {
 			return "", err
 		}
-		b.add(fmt.Sprintf("\n## Latest %d exchanges of %q, oldest first: chat_get id=N fetches one whole, tool output included\n", len(recent), project))
+		b.add(fmt.Sprintf("\n## Latest %d exchanges of %q, oldest first: chat_get id=N fetches one whole, tool output included\n", len(recent), name))
 		for _, e := range recent {
 			if oldest == 0 {
 				oldest = e.ID
@@ -99,7 +100,7 @@ func Digest(ctx context.Context, st *store.Store, kind, project string, now time
 		}
 	}
 
-	more := fmt.Sprintf("\n## More\nchat_search query=\"<the user's words>\" finds what was said; kv_search query=\"<subject>\" finds notes; chat_tail project=%q", project)
+	more := fmt.Sprintf("\n## More\nchat_search query=\"<the user's words>\" finds what was said; kv_search query=\"<subject>\" finds notes; chat_tail project=%q", name)
 	if oldest > 0 {
 		more += fmt.Sprintf(" before=%d pages back from the oldest exchange above", oldest)
 	} else {

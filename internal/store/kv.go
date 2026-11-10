@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -16,6 +17,10 @@ import (
 // one short line per key, a pointer into the other stores (chat:<id>, file:line, sha), never their payload.
 // A write appends a row and never changes one; a read takes each key's last row, so the history stays and a read can
 // ask how the notes stood at a time, for example before a compaction.
+//
+// A note belongs to a project (the column project; '' is global, seen by every project). A key written under "global/" is
+// global, and its stored key drops that prefix. A read for a project sees its own notes and the global ones; where both
+// hold a key the project's own wins, a deletion of it included, so a project can mute a global note. "*" reads every project.
 
 const (
 	// KVSoft is the length a value should stay under: past it the write is kept and a warning names the key.
@@ -27,6 +32,11 @@ const (
 	kvKeyMax = 128
 	// kvStamp has a fixed width, so the stamps compare as text in time order; RFC3339Nano drops trailing zeros and would not.
 	kvStamp = "2006-01-02T15:04:05.000000000Z"
+	// GlobalPrefix on a key written or read means the global scope; GlobalProject names that scope as a project.
+	GlobalPrefix  = "global/"
+	GlobalProject = "global"
+	// AllProjects, as the project of a read, reads every project's notes.
+	AllProjects = "*"
 )
 
 // ErrRefused marks a request the store will not take, as opposed to one it failed to carry out.
@@ -34,13 +44,14 @@ var ErrRefused = errors.New("refused")
 
 // KV is one key's last value. Age and Stale are set by KVRead; Out and In only when the read follows edges.
 type KV struct {
-	Key   string    `json:"key"`
-	Value string    `json:"value"`
-	Time  time.Time `json:"time"`
-	Age   string    `json:"age,omitempty"`
-	Stale bool      `json:"stale,omitempty"`
-	Out   []Edge    `json:"out,omitempty"`
-	In    []Edge    `json:"in,omitempty"`
+	Key     string    `json:"key"`
+	Value   string    `json:"value"`
+	Project string    `json:"project,omitempty"` // global, or the project's key as people read it
+	Time    time.Time `json:"time"`
+	Age     string    `json:"age,omitempty"`
+	Stale   bool      `json:"stale,omitempty"`
+	Out     []Edge    `json:"out,omitempty"`
+	In      []Edge    `json:"in,omitempty"`
 }
 
 func refuse(format string, a ...any) error {
@@ -73,11 +84,48 @@ func kvValue(k, v string) error {
 	return nil
 }
 
-// KVWrite sets and deletes keys in one transaction, after checking all of them: one bad entry writes nothing.
+// scoped splits a key as a caller wrote it: the project column it lives under (project is the caller's own, already a key,
+// or GlobalProject) and the key as stored.
+func scoped(project, key string) (col, stored string) {
+	if k, ok := strings.CutPrefix(key, GlobalPrefix); ok {
+		return "", k
+	}
+	return colOf(project), key
+}
+
+// colOf is the value of the project column for a project key: global is stored as ”.
+func colOf(project string) string {
+	if project == GlobalProject {
+		return ""
+	}
+	return project
+}
+
+// label is a project column as a reader sees it.
+func label(col string) string {
+	if col == "" {
+		return GlobalProject
+	}
+	return shortKey(col)
+}
+
+// writeScope resolves the project of a write: one project, never "*".
+func (s *Store) writeScope(ctx context.Context, project string) (string, error) {
+	if project == AllProjects {
+		return "", refuse(`a write names one project, not "*"`)
+	}
+	return s.ResolveProject(ctx, project)
+}
+
+// KVWrite sets and deletes keys of a project in one transaction, after checking all of them: one bad entry writes nothing.
 // It returns a warning for each value longer than KVSoft.
-func (s *Store) KVWrite(ctx context.Context, set map[string]string, del []string) ([]string, error) {
+func (s *Store) KVWrite(ctx context.Context, project string, set map[string]string, del []string) ([]string, error) {
 	if len(set)+len(del) == 0 {
 		return nil, refuse("nothing to write")
+	}
+	project, err := s.writeScope(ctx, project)
+	if err != nil {
+		return nil, err
 	}
 	keys := make([]string, 0, len(set))
 	for k := range set {
@@ -86,7 +134,8 @@ func (s *Store) KVWrite(ctx context.Context, set map[string]string, del []string
 	slices.Sort(keys)
 	var warn []string
 	for _, k := range keys {
-		if err := errors.Join(kvKey(k), kvValue(k, set[k])); err != nil {
+		_, stored := scoped(project, k)
+		if err := errors.Join(kvKey(stored), kvValue(k, set[k])); err != nil {
 			return nil, err
 		}
 		if n := len(set[k]); n > KVSoft {
@@ -94,8 +143,8 @@ func (s *Store) KVWrite(ctx context.Context, set map[string]string, del []string
 		}
 	}
 	for _, k := range del {
-		if err := kvKey(k); err != nil {
-			return nil, err
+		if _, stored := scoped(project, k); kvKey(stored) != nil {
+			return nil, kvKey(stored)
 		}
 		if _, ok := set[k]; ok {
 			return nil, refuse("key %q: both set and deleted", k)
@@ -108,57 +157,123 @@ func (s *Store) KVWrite(ctx context.Context, set map[string]string, del []string
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(kvStamp)
 	for _, k := range keys {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO kv(key, value, time, deleted) VALUES(?,?,?,0)`, k, set[k], now); err != nil {
+		col, stored := scoped(project, k)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO kv(key, value, time, deleted, project) VALUES(?,?,?,0,?)`, stored, set[k], now, col); err != nil {
 			return nil, err
 		}
 	}
 	for _, k := range del {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO kv(key, value, time, deleted) VALUES(?,'',?,1)`, k, now); err != nil {
+		col, stored := scoped(project, k)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO kv(key, value, time, deleted, project) VALUES(?,'',?,1,?)`, stored, now, col); err != nil {
 			return nil, err
 		}
 	}
 	return warn, tx.Commit()
 }
 
-// KVRead returns, sorted by key, the last value of each named key and of every key starting with a prefix; the prefix ""
-// is every key. A deleted key is left out. A non-zero at reads the notes as they stood then.
-func (s *Store) KVRead(ctx context.Context, keys, prefixes []string, at time.Time) ([]KV, error) {
-	if len(keys)+len(prefixes) == 0 {
-		return nil, refuse(`name keys or prefixes; the prefix "" reads every key`)
-	}
+// kvSel is what a read names: exact keys and key prefixes.
+type kvSel struct{ keys, prefixes []string }
+
+func (k kvSel) empty() bool { return len(k.keys)+len(k.prefixes) == 0 }
+
+// cond is the SQL condition on a key column and its arguments.
+func (k kvSel) cond() (string, []any) {
 	var cond []string
 	var args []any
-	if len(keys) > 0 {
-		cond = append(cond, `key IN (`+strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")+`)`)
-		for _, k := range keys {
-			args = append(args, k)
+	if len(k.keys) > 0 {
+		cond = append(cond, `key IN (`+strings.TrimSuffix(strings.Repeat("?,", len(k.keys)), ",")+`)`)
+		for _, key := range k.keys {
+			args = append(args, key)
 		}
 	}
-	for _, p := range prefixes {
+	for _, p := range k.prefixes {
 		cond = append(cond, `instr(key, ?) = 1`) // instr counts characters, so it holds for a prefix that is not ASCII; '' gives 1
 		args = append(args, p)
 	}
-	q := `SELECT key, value, time FROM kv WHERE rid IN (SELECT max(rid) FROM kv WHERE (` + strings.Join(cond, " OR ") + `)`
+	return strings.Join(cond, " OR "), args
+}
+
+// KVRead returns, sorted by key, the last value of each named key and of every key starting with a prefix; the prefix ""
+// is every key. A deleted key is left out. A non-zero at reads the notes as they stood then. A name written under global/
+// reads the global notes only; any other is read for the project and, where it has none, for global.
+func (s *Store) KVRead(ctx context.Context, project string, keys, prefixes []string, at time.Time) ([]KV, error) {
+	if len(keys)+len(prefixes) == 0 {
+		return nil, refuse(`name keys or prefixes; the prefix "" reads every key`)
+	}
+	project, err := s.ResolveProject(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	var plain, global kvSel
+	for _, k := range keys {
+		if g, ok := strings.CutPrefix(k, GlobalPrefix); ok {
+			global.keys = append(global.keys, g)
+		} else {
+			plain.keys = append(plain.keys, k)
+		}
+	}
+	for _, p := range prefixes {
+		if g, ok := strings.CutPrefix(p, GlobalPrefix); ok {
+			global.prefixes = append(global.prefixes, g)
+		} else {
+			plain.prefixes = append(plain.prefixes, p)
+		}
+	}
+	out := []KV{} // no notes is an empty list, not null
+	for _, q := range []struct {
+		sel        kvSel
+		globalOnly bool
+	}{{plain, false}, {global, true}} {
+		if q.sel.empty() {
+			continue
+		}
+		got, err := s.kvLast(ctx, project, q.globalOnly, q.sel, at)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	slices.SortStableFunc(out, func(a, b KV) int { return strings.Compare(a.Key+"\x00"+a.Project, b.Key+"\x00"+b.Project) })
+	return slices.CompactFunc(out, func(a, b KV) bool { return a.Key == b.Key && a.Project == b.Project }), nil
+}
+
+// kvLast reads each selected key's last row in the scope of project: its own and the global ones, the project's winning
+// where both hold the key (a deletion wins too); globalOnly reads the global ones; "*" reads every project's, none winning.
+func (s *Store) kvLast(ctx context.Context, project string, globalOnly bool, sel kvSel, at time.Time) ([]KV, error) {
+	cond, args := sel.cond()
+	in, pick := `1`, `1`
+	switch {
+	case globalOnly:
+		in = `project = ''`
+	case project == AllProjects:
+	default:
+		in = `project IN (?, '')`
+		args = append(args, colOf(project))
+		pick = `(l.project <> '' OR NOT EXISTS (SELECT 1 FROM last o WHERE o.key = l.key AND o.project <> ''))`
+	}
+	q := `WITH last AS (SELECT key, project, max(rid) AS rid FROM kv WHERE (` + cond + `) AND ` + in
 	if !at.IsZero() {
 		q += ` AND time <= ?`
 		args = append(args, at.UTC().Format(kvStamp))
 	}
-	rows, err := s.r.QueryContext(ctx, q+` GROUP BY key) AND deleted = 0 ORDER BY key`, args...)
+	rows, err := s.r.QueryContext(ctx, q+` GROUP BY key, project)
+		SELECT k.key, k.project, k.value, k.time FROM last l JOIN kv k ON k.rid = l.rid WHERE k.deleted = 0 AND `+pick+` ORDER BY k.key, k.project`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []KV{} // no notes is an empty list, not null
 	ref := at
 	if ref.IsZero() {
 		ref = time.Now()
 	}
+	var out []KV
 	for rows.Next() {
 		var e KV
-		var t string
-		if err := rows.Scan(&e.Key, &e.Value, &t); err != nil {
+		var t, col string
+		if err := rows.Scan(&e.Key, &col, &e.Value, &t); err != nil {
 			return nil, err
 		}
+		e.Project = label(col)
 		e.Time, _ = time.Parse(kvStamp, t)
 		e.Age = kvAge(ref.Sub(e.Time))
 		e.Stale = kvLive(e.Key) && ref.Sub(e.Time) > KVStaleAfter
@@ -170,8 +285,8 @@ func (s *Store) KVRead(ctx context.Context, keys, prefixes []string, at time.Tim
 // A note is found by meaning as well as by key: each key's last value gets a vector of "key: value". The kv rows stay
 // unchanged; kv_vec lists the rows that have one. An older version keeps its vector, and KVLatest drops it at search.
 
-// latestLive is the rid of each key's last row, when that row is not a delete.
-const latestLive = `SELECT rid FROM kv WHERE rid IN (SELECT max(rid) FROM kv GROUP BY key) AND deleted = 0`
+// latestLive is the rid of each key's last row in each project, when that row is not a delete.
+const latestLive = `SELECT rid FROM kv WHERE rid IN (SELECT max(rid) FROM kv GROUP BY key, project) AND deleted = 0`
 
 // KVPending returns up to n notes waiting for a vector, as "key: value".
 func (s *Store) KVPending(ctx context.Context, n int) ([]Pending, error) {
@@ -207,18 +322,33 @@ func (s *Store) KVMarkEmbedded(ctx context.Context, items []Pending) error {
 	return tx.Commit()
 }
 
-// KVLatest returns, by rid, those of rids that are still their key's last live value and start with prefix.
-func (s *Store) KVLatest(ctx context.Context, rids []int64, prefix string) (map[int64]KV, error) {
+// KVLatest returns, by rid, those of rids that are still their key's last live value, start with prefix and are in the
+// scope of project (its own and the global notes, its own winning; "*": every project's). A prefix under global/ keeps the
+// global notes only.
+func (s *Store) KVLatest(ctx context.Context, project string, rids []int64, prefix string) (map[int64]KV, error) {
 	out := map[int64]KV{}
 	if len(rids) == 0 {
 		return out, nil
 	}
-	args := []any{prefix}
+	project, err := s.ResolveProject(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	scope, args := `1`, []any{}
+	switch p, globalOnly := strings.CutPrefix(prefix, GlobalPrefix); {
+	case globalOnly:
+		prefix, scope = p, `k.project = ''`
+	case project == AllProjects:
+	default:
+		scope = `(k.project = ? OR (k.project = '' AND NOT EXISTS (SELECT 1 FROM kv o WHERE o.key = k.key AND o.project = ?)))`
+		args = append(args, colOf(project), colOf(project))
+	}
+	args = append(args, prefix)
 	for _, r := range rids {
 		args = append(args, r)
 	}
-	rows, err := s.r.QueryContext(ctx, `SELECT rid, key, value, time FROM kv WHERE instr(key, ?) = 1 AND rid IN (`+latestLive+`)
-		AND rid IN (`+strings.TrimSuffix(strings.Repeat("?,", len(rids)), ",")+`)`, args...)
+	rows, err := s.r.QueryContext(ctx, `SELECT k.rid, k.key, k.project, k.value, k.time FROM kv k WHERE `+scope+` AND instr(k.key, ?) = 1 AND k.rid IN (`+latestLive+`)
+		AND k.rid IN (`+strings.TrimSuffix(strings.Repeat("?,", len(rids)), ",")+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -226,37 +356,37 @@ func (s *Store) KVLatest(ctx context.Context, rids []int64, prefix string) (map[
 	for rows.Next() {
 		var rid int64
 		var e KV
-		var t string
-		if err := rows.Scan(&rid, &e.Key, &e.Value, &t); err != nil {
+		var t, col string
+		if err := rows.Scan(&rid, &e.Key, &col, &e.Value, &t); err != nil {
 			return nil, err
 		}
+		e.Project = label(col)
 		e.Time, _ = time.Parse(kvStamp, t)
 		out[rid] = e
 	}
 	return out, rows.Err()
 }
 
-// KVHas returns which of keys have ever been written, a deleted one included: a key the user deleted is theirs to have deleted.
-func (s *Store) KVHas(ctx context.Context, keys []string) (map[string]bool, error) {
+// KVHas returns which of keys have ever been written in exactly this project's scope (global for a key under global/), a
+// deleted one included: a key the user deleted is theirs to have deleted.
+func (s *Store) KVHas(ctx context.Context, project string, keys []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if len(keys) == 0 {
 		return out, nil
 	}
-	args := make([]any, len(keys))
-	for i, k := range keys {
-		args[i] = k
-	}
-	rows, err := s.r.QueryContext(ctx, `SELECT DISTINCT key FROM kv WHERE key IN (`+strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")+`)`, args...)
+	project, err := s.writeScope(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
+	for _, k := range keys {
+		col, stored := scoped(project, k)
+		var one int
+		switch err := s.r.QueryRowContext(ctx, `SELECT 1 FROM kv WHERE key = ? AND project = ? LIMIT 1`, stored, col).Scan(&one); {
+		case err == nil:
+			out[k] = true
+		case !errors.Is(err, sql.ErrNoRows):
 			return nil, err
 		}
-		out[k] = true
 	}
-	return out, rows.Err()
+	return out, nil
 }

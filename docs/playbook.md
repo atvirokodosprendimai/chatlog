@@ -112,6 +112,17 @@ A background agent gets the same convention in its brief.
 | My notes, by key | `kv_read prefixes=["now/","waits/","task/open/"]` |
 | My notes, by subject | `kv_search query=<subject> [prefix]` |
 
+## Projects
+
+A project is the repository a session ran in, named by its root commit: a renamed or moved folder is the same project, and
+two folders with one name are two. Every read and write by project (`chat_tail`, the wake digest, `kv_*`, the hooks' rules)
+acts on the project of the session, and `kv_*` also on the notes under `global/`. Put a rule for every project under
+`global/` (`global/hook/prompt/1` is a line printed in every project's prompts, and `kv_read prefixes=["hook/prompt/"]`
+shows it); a rule for one project goes without the prefix. A project's own note of a key wins over a global one; deleting
+it mutes the global one there. `chatlog project ls` lists the projects with their aliases, and an alias, a short sha or the
+key goes wherever a project is named. A fleet agent working in `~/work/x` for the project `y` sets `CHATLOG_PROJECT=y-fleet`:
+its notes stay out of `y`'s wake digest and recall, and `kv_read project=y-fleet` reads them from `y`.
+
 ## Waking up
 
 The session-start hook injects a bounded digest (default 24000 bytes, about 6k tokens; `hooks.wake_bytes` in

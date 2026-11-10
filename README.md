@@ -61,7 +61,9 @@ A container image exists for running the MCP server without installing anything:
   compaction or a lost context, and says which tool answers which question.
 
 One exchange = your message, then everything the assistant did (text, tool calls with output) up to its answer.
-Project = the base name of the directory the session ran in.
+Project = the repository the session ran in (the nearest directory with a `.git`, else the directory itself), named by its root commit, so a renamed or moved folder is the same project. A project has aliases, the names you use for it: the folder's base name is added when its first exchange is stored; `chatlog project alias PROJECT NAME` adds one, `chatlog project alias -d NAME` removes one, `chatlog project ls` lists them, `chatlog project` shows the project of the current directory (so does `chatlog doctor`). An alias, a short sha (`[526abcd]`) or the key is accepted wherever a project is named: `chat_tail project=`, `chat_search repo=`, `kv_* project=`, `CHATLOG_PROJECT`. Two clones of one repository share a root commit and are one project unless `CHATLOG_PROJECT` splits them; exchanges stored before keys are matched by their folder name.
+
+Notes (kv) belong to a project: a call reads and writes its own project's notes and the global ones. A key written under `global/` is global (it reads back without the prefix, and `global/` in a read names the global notes only); a project's own note of a key wins over a global one, and deleting it there mutes the global one for that project. `project="*"` reads every project's notes, never writes. `CHATLOG_PROJECT=<name>` sets the project of a call, for an agent that works in a directory that is not its project: `<project>-fleet` keeps a fleet agent's notes out of the main project's wake digest and recall. Notes written before projects existed are global, as they were visible everywhere before.
 
 Origin: the exchange typed into a subagent's window is `subagent`, the rest `main` (the user's own session). `chat_search`, `chat_tail` and the wake digest read `main` only, so what agents did never fills the user's context; `origin=subagent` or `all` widens a search or a tail.
 

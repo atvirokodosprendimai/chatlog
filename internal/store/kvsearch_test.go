@@ -10,10 +10,10 @@ import (
 
 func TestKVPendingIsTheLastValueOfEachLiveKeyNotYetEmbedded(t *testing.T) {
 	ctx, s := context.Background(), open(t)
-	if _, err := s.KVWrite(ctx, map[string]string{"fact/kv/frame": "RULE old", "fact/jur/api": "STATE live", "now/x": "gone soon"}, nil); err != nil {
+	if _, err := s.KVWrite(ctx, "p", map[string]string{"fact/kv/frame": "RULE old", "fact/jur/api": "STATE live", "now/x": "gone soon"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.KVWrite(ctx, map[string]string{"fact/kv/frame": "RULE frame"}, []string{"now/x"}); err != nil {
+	if _, err := s.KVWrite(ctx, "p", map[string]string{"fact/kv/frame": "RULE frame"}, []string{"now/x"}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := s.KVPending(ctx, 10)
@@ -37,15 +37,15 @@ func TestKVPendingIsTheLastValueOfEachLiveKeyNotYetEmbedded(t *testing.T) {
 
 func TestKVLatestDropsOldVersionsDeletedKeysAndOtherPrefixes(t *testing.T) {
 	ctx, s := context.Background(), open(t)
-	s.KVWrite(ctx, map[string]string{"fact/kv/frame": "RULE old", "fact/jur/api": "STATE live", "now/x": "x"}, nil)
+	s.KVWrite(ctx, "p", map[string]string{"fact/kv/frame": "RULE old", "fact/jur/api": "STATE live", "now/x": "x"}, nil)
 	old, _ := s.KVPending(ctx, 10)
-	s.KVWrite(ctx, map[string]string{"fact/kv/frame": "RULE frame"}, []string{"now/x"})
+	s.KVWrite(ctx, "p", map[string]string{"fact/kv/frame": "RULE frame"}, []string{"now/x"})
 	cur, _ := s.KVPending(ctx, 10)
 	var rids []int64
 	for _, e := range append(old, cur...) {
 		rids = append(rids, e.ID)
 	}
-	got, err := s.KVLatest(ctx, rids, "fact/kv/")
+	got, err := s.KVLatest(ctx, "p", rids, "fact/kv/")
 	if err != nil {
 		t.Fatal(err)
 	}

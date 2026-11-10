@@ -112,9 +112,10 @@ func (in *Ingester) Scan(ctx context.Context) error {
 func (in *Ingester) toRow(e transcript.Exchange) store.Row {
 	c := chunk.Build(e, in.Limit)
 	sum := sha256.Sum256([]byte(c.Full))
+	id := project.FromCwd(e.Cwd, in.Store) // never the override: this may be a server a fleet agent's call started
 	return store.Row{
 		UUID: e.UUID, Session: e.Session, Agent: e.Agent, Seq: e.Offset, Source: e.Source, Time: e.Time, End: e.End, Cwd: e.Cwd,
-		Project: project.Of(e.Cwd), Closed: e.Closed, CutBytes: c.CutBytes, OverLimit: c.OverLimit,
+		Project: id.Name, PKey: id.Key, Closed: e.Closed, CutBytes: c.CutBytes, OverLimit: c.OverLimit,
 		Sha: hex.EncodeToString(sum[:8]), Words: e.Words, Answer: e.Answer, Embed: c.Embed, Text: c.Full,
 	}
 }

@@ -66,7 +66,11 @@ Reading a search result:
   degraded a step that did not run and why: without it the result is complete
 A hit is what was said at that time, not the state now: check it against the code.
 
-Project = the base name of the session's working directory. Secrets are redacted best-effort, by shape: the data dir is private.
+Project = the repository the session ran in, named by its root commit (a renamed folder is the same project); the names you use are aliases:
+chatlog project ls | alias PROJECT NAME | alias -d NAME, and chatlog project prints this directory's. An alias, a short sha ([526abcd]) or the
+key is accepted wherever a project is named. Notes (kv_*) belong to a project: a call sees its project's and the global ones; a key written
+under global/ is global; a project's own note of a key wins over a global one; project="*" reads all. CHATLOG_PROJECT=<name> sets the project
+of a call (a fleet agent in ~/work/x sets <project>-fleet). Secrets are redacted best-effort, by shape: the data dir is private.
 
 ` + mcpserver.Core + `
 Origin: the exchange typed into a subagent's window is subagent, the rest main (the user's own session). chat_search, chat_tail and the
@@ -147,7 +151,7 @@ func main() {
 			&cli.StringFlag{Name: "socket", Sources: cli.EnvVars("CHATLOG_SOCKET"), Usage: "default: a short per-data-dir path under $XDG_RUNTIME_DIR, else the temp dir"},
 		},
 		Commands: []*cli.Command{serverCmd(cfg), searchCmd(), statusCmd(), mcpCmd(), hookCmd(cfg, cfgErr), ingestCmd(cfg), eventsCmd(),
-			installCmd(), doctorCmd(cfg), wakeCmd(cfg), seedCmd(), forgetCmd(), exportCmd(), evalCmd(), {
+			installCmd(), doctorCmd(cfg), wakeCmd(cfg), seedCmd(), projectCmd(), forgetCmd(), exportCmd(), evalCmd(), {
 				Name: "instructions", Usage: "what it is for and how to read its output (--core: the rules alone)",
 				Flags: []cli.Flag{&cli.BoolFlag{Name: "core", Usage: "print only the rules every session follows; the same text the MCP server gives at initialize"}},
 				Action: func(_ context.Context, cmd *cli.Command) error {

@@ -110,7 +110,7 @@ func installCmd() *cli.Command {
 			for _, n := range missing {
 				set[n.Key] = n.Value
 			}
-			if _, err := st.KVWrite(ctx, set, nil); err != nil {
+			if _, err := st.KVWrite(ctx, store.GlobalProject, set, nil); err != nil {
 				return err
 			}
 			fmt.Printf("%d starter notes written to the history (rule/ tool/ legend/)\n", len(set))
@@ -172,6 +172,15 @@ func doctorCmd(cfg config.File) *cli.Command {
 					}
 					return fmt.Sprintf("%s: %d exchanges, %d sessions, %d waiting for a vector; last hook record: %s",
 						filepath.Join(dataDir(cmd), "chatlog.db"), s.Chunks, s.Sessions, s.Pending, last), err
+				}},
+				{name: "project", run: func(ctx context.Context) (string, error) {
+					st, err := openStore(cmd, 5*time.Second)
+					if err != nil {
+						return "", err
+					}
+					defer st.Close()
+					cwd, _ := os.Getwd()
+					return describeProject(ctx, st, cwd)
 				}},
 				{name: "Claude Code settings", run: func(context.Context) (string, error) {
 					missing, err := install.Missing(install.Options{Settings: cmd.String("settings"), ClaudeJSON: cmd.String("claude-json"), Skill: cmd.String("skill")})

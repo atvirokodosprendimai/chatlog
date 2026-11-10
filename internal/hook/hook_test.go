@@ -344,7 +344,7 @@ func TestSpooledPreJoinsItsPost(t *testing.T) {
 func TestSessionStartPointsAtRecall(t *testing.T) {
 	r := newRig(t)
 	ctx, _ := r.run("SessionStart", `{"session_id":"s1","cwd":"/u/webshop","source":"startup"}`)
-	if !strings.HasPrefix(ctx, playbook.FirstLine) || !strings.Contains(ctx, `chat_tail project="webshop"`) || strings.Contains(ctx, "COMPACTED") {
+	if !strings.HasPrefix(ctx, playbook.FirstLine) || !strings.Contains(ctx, `chat_tail project="path:/u/webshop"`) || strings.Contains(ctx, "COMPACTED") {
 		t.Fatalf("%q", ctx)
 	}
 	ctx, _ = r.run("SessionStart", `{"session_id":"s1","cwd":"/u/webshop","source":"compact"}`)

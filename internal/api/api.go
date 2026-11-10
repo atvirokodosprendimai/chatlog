@@ -31,9 +31,14 @@ const (
 	TailMax     = 200000
 )
 
+// Every kv request names the project it acts for (an alias, a short sha, a key; the MCP server sends its own): the
+// project's notes and the global ones; "*" reads every project, never writes. A request that names none is refused, so a
+// client from before projects fails loudly instead of writing into the wrong one.
+
 // KVReadRequest names keys and prefixes; At, RFC3339, reads the notes as they stood then. LinkedTo adds the keys linked
 // to that object; Follow 1 lists each key's edges out and in, one hop.
 type KVReadRequest struct {
+	Project  string   `json:"project"`
 	Keys     []string `json:"keys,omitempty"`
 	Prefixes []string `json:"prefixes,omitempty"`
 	At       string   `json:"at,omitempty"`
@@ -43,14 +48,16 @@ type KVReadRequest struct {
 
 // KVWriteRequest sets and deletes keys in one transaction.
 type KVWriteRequest struct {
-	Set map[string]string `json:"set,omitempty"`
-	Del []string          `json:"del,omitempty"`
+	Project string            `json:"project"`
+	Set     map[string]string `json:"set,omitempty"`
+	Del     []string          `json:"del,omitempty"`
 }
 
 // KVLinkRequest adds and deletes links in one transaction.
 type KVLinkRequest struct {
-	Add []store.Link `json:"add,omitempty"`
-	Del []store.Link `json:"del,omitempty"`
+	Project string       `json:"project"`
+	Add     []store.Link `json:"add,omitempty"`
+	Del     []store.Link `json:"del,omitempty"`
 }
 
 // KVLinkResponse says how many links were added and deleted.
@@ -67,9 +74,10 @@ type KVWriteResponse struct {
 
 // KVSearchRequest finds notes by meaning; Prefix narrows to a subtree of keys.
 type KVSearchRequest struct {
-	Query  string `json:"query"`
-	Prefix string `json:"prefix,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
+	Project string `json:"project"`
+	Query   string `json:"query"`
+	Prefix  string `json:"prefix,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
 }
 
 // Tail is one page of a project's latest exchanges; Next is the before of the page behind it, absent at the start.
@@ -149,7 +157,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		warn, err := svc.Store.KVWrite(r.Context(), req.Set, req.Del)
+		warn, err := svc.Store.KVWrite(r.Context(), req.Project, req.Set, req.Del)
 		reply(w, KVWriteResponse{Written: len(req.Set) + len(req.Del), Warnings: warn}, err)
 	})
 	mux.HandleFunc("POST /kv/link", func(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +166,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		err := svc.Store.KVLink(r.Context(), req.Add, req.Del)
+		err := svc.Store.KVLink(r.Context(), req.Project, req.Add, req.Del)
 		reply(w, KVLinkResponse{Added: len(req.Add), Deleted: len(req.Del)}, err)
 	})
 	mux.HandleFunc("POST /kv/search", func(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +175,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		hits, err := svc.KVSearch(r.Context(), req.Query, req.Prefix, req.Limit)
+		hits, err := svc.KVSearch(r.Context(), req.Project, req.Query, req.Prefix, req.Limit)
 		reply(w, hits, err)
 	})
 	mux.HandleFunc("GET /tail", func(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +206,7 @@ func kvRead(ctx context.Context, st *store.Store, req KVReadRequest, at time.Tim
 	}
 	keys := req.Keys
 	if req.LinkedTo != "" {
-		subj, err := st.KVLinkedTo(ctx, req.LinkedTo, at)
+		subj, err := st.KVLinkedTo(ctx, req.Project, req.LinkedTo, at)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +215,7 @@ func kvRead(ctx context.Context, st *store.Store, req KVReadRequest, at time.Tim
 		}
 		keys = append(slices.Clone(keys), subj...)
 	}
-	kv, err := st.KVRead(ctx, keys, req.Prefixes, at)
+	kv, err := st.KVRead(ctx, req.Project, keys, req.Prefixes, at)
 	if err != nil || req.Follow == 0 {
 		return kv, err
 	}
@@ -215,7 +223,7 @@ func kvRead(ctx context.Context, st *store.Store, req KVReadRequest, at time.Tim
 	for i, e := range kv {
 		names[i] = e.Key
 	}
-	out, in, err := st.KVEdges(ctx, names, at)
+	out, in, err := st.KVEdges(ctx, req.Project, names, at)
 	if err != nil {
 		return nil, err
 	}

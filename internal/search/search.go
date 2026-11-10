@@ -98,10 +98,14 @@ type KVHit struct {
 	Score float32 `json:"score"`
 }
 
-// KVSearch returns the notes nearest the query, each key at its last value; prefix narrows to a subtree.
-func (s *Service) KVSearch(ctx context.Context, q, prefix string, limit int) ([]KVHit, error) {
+// KVSearch returns the notes nearest the query, each key at its last value; prefix narrows to a subtree. It sees the notes
+// of project and the global ones ("*": every project's).
+func (s *Service) KVSearch(ctx context.Context, project, q, prefix string, limit int) ([]KVHit, error) {
 	if strings.TrimSpace(q) == "" {
 		return nil, errors.New("empty query")
+	}
+	if _, err := s.Store.ResolveProject(ctx, project); err != nil { // before the embedder is asked: a request that names none is no work
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 10
@@ -112,7 +116,8 @@ func (s *Service) KVSearch(ctx context.Context, q, prefix string, limit int) ([]
 	if err != nil {
 		return nil, err
 	}
-	hits, err := s.KVVec.Query(ctx, vecs[0], vectorFetch) // wide: old versions and other prefixes are dropped after
+	// every vector is asked for: the notes of a hundred projects share one index, and what is not this project's is dropped after
+	hits, err := s.KVVec.Query(ctx, vecs[0], s.KVVec.Count())
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +125,7 @@ func (s *Service) KVSearch(ctx context.Context, q, prefix string, limit int) ([]
 	for i, h := range hits {
 		rids[i] = h.ID
 	}
-	live, err := s.Store.KVLatest(ctx, rids, prefix)
+	live, err := s.Store.KVLatest(ctx, project, rids, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -246,6 +251,15 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 		return Response{}, fmt.Errorf("origin %q: main, subagent or all", r.Origin)
 	}
 	f := store.Filter{Since: since, Repo: r.Repo, Origin: r.Origin}
+	if r.Repo != "" { // an alias, a short sha or a key names the project; any other word is part of a path
+		key, names, found, err := s.Store.FindProject(ctx, r.Repo)
+		if err != nil {
+			return Response{}, err
+		}
+		if found {
+			f.Key, f.Names = key, names
+		}
+	}
 	resp := Response{Mode: mode}
 
 	var vecList, ftsList []int64

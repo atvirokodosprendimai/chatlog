@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS exchanges(
   id INTEGER PRIMARY KEY, uuid TEXT NOT NULL UNIQUE, session TEXT NOT NULL, agent TEXT NOT NULL, seq INTEGER NOT NULL, source TEXT NOT NULL,
   time TEXT NOT NULL, end_time TEXT NOT NULL, cwd TEXT NOT NULL, project TEXT NOT NULL, prio INTEGER NOT NULL, closed INTEGER NOT NULL,
   cut_bytes INTEGER NOT NULL, over_limit INTEGER NOT NULL, text_len INTEGER NOT NULL, sha TEXT NOT NULL, embedded_sha TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL, words TEXT NOT NULL, answer TEXT NOT NULL, embed_text TEXT NOT NULL, text TEXT NOT NULL);
+  updated_at TEXT NOT NULL, words TEXT NOT NULL, answer TEXT NOT NULL, embed_text TEXT NOT NULL, text TEXT NOT NULL, pkey TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS exchanges_time ON exchanges(time);
 CREATE INDEX IF NOT EXISTS exchanges_pending ON exchanges(prio, time DESC) WHERE embedded_sha <> sha;
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(words, answer, text, content='exchanges', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
@@ -37,12 +37,15 @@ CREATE TRIGGER IF NOT EXISTS ex_au AFTER UPDATE OF words, answer, text ON exchan
   INSERT INTO fts(rowid, words, answer, text) VALUES (new.id, new.words, new.answer, new.text); END;
 CREATE TABLE IF NOT EXISTS cursors(path TEXT PRIMARY KEY, offset INTEGER NOT NULL, read_to INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS kv(rid INTEGER PRIMARY KEY, key TEXT NOT NULL, value TEXT NOT NULL, time TEXT NOT NULL, deleted INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS kv(rid INTEGER PRIMARY KEY, key TEXT NOT NULL, value TEXT NOT NULL, time TEXT NOT NULL, deleted INTEGER NOT NULL, project TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS kv_key ON kv(key, rid);
 CREATE TABLE IF NOT EXISTS kv_vec(rid INTEGER PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS kv_link(rid INTEGER PRIMARY KEY, s TEXT NOT NULL, p TEXT NOT NULL, o TEXT NOT NULL, time TEXT NOT NULL, deleted INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS kv_link(rid INTEGER PRIMARY KEY, s TEXT NOT NULL, p TEXT NOT NULL, o TEXT NOT NULL, time TEXT NOT NULL, deleted INTEGER NOT NULL, project TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS kv_link_s ON kv_link(s, rid);
 CREATE INDEX IF NOT EXISTS kv_link_o ON kv_link(o, rid);
+CREATE TABLE IF NOT EXISTS project_alias(alias TEXT PRIMARY KEY, key TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS project_alias_key ON project_alias(key);
+CREATE TABLE IF NOT EXISTS project_root(root TEXT PRIMARY KEY, key TEXT NOT NULL);
 `
 
 // Store holds the two connection pools.
@@ -76,6 +79,10 @@ func OpenWith(path string, busy time.Duration) (*Store, error) {
 		w.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	if err := migrate(w); err != nil {
+		w.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	r, err := sql.Open("sqlite", dsn+"&_pragma=query_only(1)")
 	if err != nil {
 		w.Close()
@@ -101,6 +108,7 @@ type Row struct {
 	End       time.Time `json:"end"`
 	Cwd       string    `json:"cwd"`
 	Project   string    `json:"project"`
+	PKey      string    `json:"pkey,omitempty"` // the project's key: see package project; empty on an exchange stored before keys
 	Prio      int       `json:"-"`
 	Closed    bool      `json:"closed"`
 	CutBytes  int       `json:"cut_bytes"`
@@ -156,10 +164,13 @@ func upsert(ctx context.Context, tx *sql.Tx, r *Row, now string) error {
 	err := tx.QueryRowContext(ctx, `SELECT sha, text_len FROM exchanges WHERE uuid=?`, r.UUID).Scan(&sha, &textLen)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		_, err := tx.ExecContext(ctx, `INSERT INTO exchanges(uuid, session, agent, seq, source, time, end_time, cwd, project, prio, closed, cut_bytes,
-			over_limit, text_len, sha, updated_at, words, answer, embed_text, text) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			r.UUID, r.Session, r.Agent, r.Seq, r.Source, stamp(r.Time), stamp(r.End), r.Cwd, r.Project, r.Prio, r.Closed, r.CutBytes,
+		_, err := tx.ExecContext(ctx, `INSERT INTO exchanges(uuid, session, agent, seq, source, time, end_time, cwd, project, pkey, prio, closed, cut_bytes,
+			over_limit, text_len, sha, updated_at, words, answer, embed_text, text) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			r.UUID, r.Session, r.Agent, r.Seq, r.Source, stamp(r.Time), stamp(r.End), r.Cwd, r.Project, r.PKey, r.Prio, r.Closed, r.CutBytes,
 			r.OverLimit, len(r.Text), r.Sha, now, r.Words, r.Answer, r.Embed, r.Text)
+		if err == nil && r.PKey != "" && validAlias(r.Project) == nil { // the folder's name is the first alias of its project
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO project_alias(alias, key) VALUES(?, ?)`, r.Project, r.PKey)
+		}
 		return err
 	case err != nil:
 		return err
@@ -254,6 +265,8 @@ type Filter struct {
 	Since  time.Time
 	Repo   string
 	Origin string
+	Key    string   // a project named by key or alias: it replaces Repo; see FindProject
+	Names  []string // the names of that project, for the exchanges stored before keys
 }
 
 func (f Filter) where() (string, []any) {
@@ -263,7 +276,11 @@ func (f Filter) where() (string, []any) {
 		cond = append(cond, `e.time >= ?`)
 		args = append(args, stamp(f.Since))
 	}
-	if f.Repo != "" {
+	if f.Key != "" {
+		c, a, _ := namedBy(f.Key, f.Names)
+		cond = append(cond, c)
+		args = append(args, a...)
+	} else if f.Repo != "" {
 		cond = append(cond, `(e.cwd LIKE ? OR e.project LIKE ?)`)
 		args = append(args, "%"+f.Repo+"%", "%"+f.Repo+"%")
 	}

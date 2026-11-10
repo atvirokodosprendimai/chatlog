@@ -67,3 +67,5 @@ embedder adds its own time):
 Karma's cost is reading `sit/` and compiling its patterns at each call: about 11 ms at 300 situations, in proportion to
 their number (a team's own library is a few dozen). The check reads the transcript from its end, 128 KB at a time, and
 stops at the last prompt the person typed.
+
+**The project of a hook**: the rules a hook reads (`hook/`, `sit/`, `lib/`) and the notes it prints are those of the session's project (the repository of its `cwd`, or `CHATLOG_PROJECT`) and the global ones (`global/`), so one project's karma does not fire in another. The project is found from the `cwd` by the nearest `.git`; the root commit is looked up once per repository and kept in the data dir (walking the history of a large repository takes seconds), so a hook pays two small lookups: `PreToolUse` with karma off measured p50 24 ms, p95 26.5 ms on a Linux host, a git working directory, cache warm.

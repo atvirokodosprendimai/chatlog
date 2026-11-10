@@ -62,8 +62,11 @@ type Deps struct {
 	Now    func() time.Time
 	Spool  string // a file for records the database refused (locked past the wait); the next hook writes them; "" drops them
 	// Recall finds notes by meaning through the server's embedder; nil: no such search (the other pieces do not need it)
-	Recall func(ctx context.Context, query string, limit int) ([]search.KVHit, error)
+	Recall func(ctx context.Context, project, query string, limit int) ([]search.KVHit, error)
 }
+
+// project is the project a hook call acts for: the one resolver, which the MCP server's tail default and notes use too.
+func (d Deps) project(in Input) string { return project.Resolve(in.Cwd, d.Store).Key }
 
 // record writes one row; when the database refuses it the row goes to the spool, so a lock held longer than a hook may
 // wait costs a delay, not a record.
@@ -232,7 +235,7 @@ func Handle(ctx context.Context, in Input, d Deps) (string, error) {
 		errs = append(errs, err, push(ctx, d.Store, since, in.TranscriptPath), push(ctx, d.Store, since, in.AgentTranscriptPath))
 	}
 	if in.Event == "SessionStart" && h.On(config.PieceRecall) {
-		digest, err := wake.Digest(ctx, d.Store, wake.KindOf(in.Source), project.Resolve(in.Cwd), now, h.Wake())
+		digest, err := wake.Digest(ctx, d.Store, wake.KindOf(in.Source), d.project(in), now, h.Wake())
 		if err != nil { // the rule still goes in: a session must never start without it
 			digest = playbook.Rule
 		}

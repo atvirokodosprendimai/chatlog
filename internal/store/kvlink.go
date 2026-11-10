@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -71,14 +72,26 @@ func kvLinkShape(l Link) error {
 	return kvKey(l.S)
 }
 
-// KVLink adds and deletes links in one transaction, after checking all of them: one bad link writes nothing.
-// An added link's subject must be a live key, so an edge never hangs from nothing; a delete needs only the shape.
-func (s *Store) KVLink(ctx context.Context, add, del []Link) error {
+// linkScope splits a link's subject as a caller wrote it, as scoped does a key; the object is a pointer and stays as written.
+func linkScope(project string, l Link) (col string, stored Link) {
+	col, l.S = scoped(project, l.S)
+	return col, l
+}
+
+// KVLink adds and deletes links of a project in one transaction, after checking all of them: one bad link writes nothing.
+// An added link's subject must be a live key in the link's scope (the project's, or the global notes), so an edge never
+// hangs from nothing; a delete needs only the shape. A subject under global/ makes a global link.
+func (s *Store) KVLink(ctx context.Context, project string, add, del []Link) error {
 	if len(add)+len(del) == 0 {
 		return refuse("nothing to link")
 	}
+	project, err := s.writeScope(ctx, project)
+	if err != nil {
+		return err
+	}
 	for _, l := range append(slices.Clone(add), del...) {
-		if err := kvLinkShape(l); err != nil {
+		_, st := linkScope(project, l)
+		if err := kvLinkShape(st); err != nil {
 			return err
 		}
 	}
@@ -93,19 +106,18 @@ func (s *Store) KVLink(ctx context.Context, add, del []Link) error {
 	}
 	defer tx.Rollback()
 	for _, l := range add {
-		var deleted int
-		err := tx.QueryRowContext(ctx, `SELECT deleted FROM kv WHERE key = ? ORDER BY rid DESC LIMIT 1`, l.S).Scan(&deleted)
-		if err == sql.ErrNoRows || deleted == 1 {
-			return refuse("link %s %s %s: %q is not a key; write it first", l.S, l.P, l.O, l.S)
-		}
-		if err != nil {
+		col, st := linkScope(project, l)
+		if ok, err := liveKey(ctx, tx, col, st.S); err != nil {
 			return err
+		} else if !ok {
+			return refuse("link %s %s %s: %q is not a key; write it first", l.S, l.P, l.O, l.S)
 		}
 	}
 	now := time.Now().UTC().Format(kvStamp)
 	for i, ls := range [][]Link{add, del} {
 		for _, l := range ls {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO kv_link(s, p, o, time, deleted) VALUES(?,?,?,?,?)`, l.S, l.P, l.O, now, i); err != nil {
+			col, st := linkScope(project, l)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO kv_link(s, p, o, time, deleted, project) VALUES(?,?,?,?,?,?)`, st.S, st.P, st.O, now, i, col); err != nil {
 				return err
 			}
 		}
@@ -113,21 +125,48 @@ func (s *Store) KVLink(ctx context.Context, add, del []Link) error {
 	return tx.Commit()
 }
 
-// liveLinks returns the links standing at at (zero is now) whose subject or object, as cond names it, is one of vals.
-func (s *Store) liveLinks(ctx context.Context, cond string, vals []string, at time.Time) ([]Link, error) {
-	args := make([]any, 0, 2*len(vals)+1)
+// liveKey says whether key is live in the scope col: the column's own last row decides when it has one (a deletion
+// included), else the global notes' do.
+func liveKey(ctx context.Context, tx *sql.Tx, col, key string) (bool, error) {
+	scopes := []string{col}
+	if col != "" {
+		scopes = append(scopes, "")
+	}
+	for _, c := range scopes {
+		var deleted int
+		switch err := tx.QueryRowContext(ctx, `SELECT deleted FROM kv WHERE key = ? AND project = ? ORDER BY rid DESC LIMIT 1`, key, c).Scan(&deleted); {
+		case err == nil:
+			return deleted == 0, nil
+		case !errors.Is(err, sql.ErrNoRows):
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+// liveLinks returns the links standing at at (zero is now) whose subject or object, as cond names it, is one of vals, in
+// the scope of project: its own and the global ones, the project's own row of a link winning (a deletion included); "*": all.
+func (s *Store) liveLinks(ctx context.Context, project, cond string, vals []string, at time.Time) ([]Link, error) {
+	args := make([]any, 0, 2*len(vals)+2)
 	in := strings.TrimSuffix(strings.Repeat("?,", len(vals)), ",")
 	for range strings.Count(cond, "%s") {
 		for _, v := range vals {
 			args = append(args, v)
 		}
 	}
-	q := `SELECT s, p, o FROM kv_link WHERE rid IN (SELECT max(rid) FROM kv_link WHERE (` + strings.ReplaceAll(cond, "%s", in) + `)`
+	scope, pick := `1`, `1`
+	if project != AllProjects {
+		scope = `project IN (?, '')`
+		args = append(args, colOf(project))
+		pick = `(l.project <> '' OR NOT EXISTS (SELECT 1 FROM last o WHERE o.s = l.s AND o.p = l.p AND o.o = l.o AND o.project <> ''))`
+	}
+	q := `WITH last AS (SELECT s, p, o, project, max(rid) AS rid FROM kv_link WHERE (` + strings.ReplaceAll(cond, "%s", in) + `) AND ` + scope
 	if !at.IsZero() {
 		q += ` AND time <= ?`
 		args = append(args, at.UTC().Format(kvStamp))
 	}
-	rows, err := s.r.QueryContext(ctx, q+` GROUP BY s, p, o) AND deleted = 0 ORDER BY s, p, o`, args...)
+	rows, err := s.r.QueryContext(ctx, q+` GROUP BY s, p, o, project)
+		SELECT DISTINCT k.s, k.p, k.o FROM last l JOIN kv_link k ON k.rid = l.rid WHERE k.deleted = 0 AND `+pick+` ORDER BY k.s, k.p, k.o`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -143,13 +182,16 @@ func (s *Store) liveLinks(ctx context.Context, cond string, vals []string, at ti
 	return out, rows.Err()
 }
 
-// KVEdges returns, one hop, the edges out of and into each of keys as they stood at at (zero is now).
-func (s *Store) KVEdges(ctx context.Context, keys []string, at time.Time) (out, in map[string][]Edge, err error) {
+// KVEdges returns, one hop, the edges out of and into each of keys as they stood at at (zero is now), in the scope of project.
+func (s *Store) KVEdges(ctx context.Context, project string, keys []string, at time.Time) (out, in map[string][]Edge, err error) {
 	out, in = map[string][]Edge{}, map[string][]Edge{}
 	if len(keys) == 0 {
 		return out, in, nil
 	}
-	links, err := s.liveLinks(ctx, `s IN (%s) OR o IN (%s)`, keys, at)
+	if project, err = s.ResolveProject(ctx, project); err != nil {
+		return nil, nil, err
+	}
+	links, err := s.liveLinks(ctx, project, `s IN (%s) OR o IN (%s)`, keys, at)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -164,9 +206,13 @@ func (s *Store) KVEdges(ctx context.Context, keys []string, at time.Time) (out, 
 	return out, in, nil
 }
 
-// KVLinkedTo returns, sorted, the subjects of the links into o standing at at (zero is now).
-func (s *Store) KVLinkedTo(ctx context.Context, o string, at time.Time) ([]string, error) {
-	links, err := s.liveLinks(ctx, `o IN (%s)`, []string{o}, at)
+// KVLinkedTo returns, sorted, the subjects of the links into o standing at at (zero is now), in the scope of project.
+func (s *Store) KVLinkedTo(ctx context.Context, project, o string, at time.Time) ([]string, error) {
+	project, err := s.ResolveProject(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	links, err := s.liveLinks(ctx, project, `o IN (%s)`, []string{o}, at)
 	if err != nil {
 		return nil, err
 	}

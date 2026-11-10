@@ -27,8 +27,8 @@ const (
 // search is skipped and logged; the always-on notes and the situations are read from the file and never wait on it.
 var recallBudget = 1500 * time.Millisecond
 
-func (d Deps) kv(ctx context.Context, prefixes ...string) ([]store.KV, error) {
-	return d.Store.KVRead(ctx, nil, prefixes, time.Time{})
+func (d Deps) kv(ctx context.Context, in Input, prefixes ...string) ([]store.KV, error) {
+	return d.Store.KVRead(ctx, d.project(in), nil, prefixes, time.Time{})
 }
 
 // promptParts are what the knowledge pieces add to a prompt, in their order: notes, last turn's misses, context, recall.
@@ -37,7 +37,7 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 	var kvs []store.KV
 	if h.On(config.PieceNotes) || h.On(config.PiecePrompt) {
 		var err error
-		if kvs, err = d.kv(ctx, know.PromptPrefix, know.SitPrefix, know.CheckPrefix); err != nil {
+		if kvs, err = d.kv(ctx, in, know.PromptPrefix, know.SitPrefix, know.CheckPrefix); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -77,7 +77,7 @@ func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV) (parts []str
 	if d.Recall != nil && know.WantRecall(in.Prompt) {
 		rctx, cancel := context.WithTimeout(ctx, recallBudget)
 		start := time.Now()
-		hits, err := d.Recall(rctx, in.Prompt, 30)
+		hits, err := d.Recall(rctx, d.project(in), in.Prompt, 30)
 		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("prompt recall skipped after %d ms: %w", time.Since(start).Milliseconds(), err))
@@ -89,7 +89,7 @@ func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV) (parts []str
 	_, badS := know.ParseSigs(kvs)
 	_, badC := know.ParseRules(kvs)
 	for _, g := range know.MatchWords(words, in.Prompt) {
-		linked, err := d.Store.KVLinkedTo(ctx, know.SitPrefix+g, time.Time{})
+		linked, err := d.Store.KVLinkedTo(ctx, d.project(in), know.SitPrefix+g, time.Time{})
 		errs = append(errs, err)
 		parts = append(parts, "situation "+know.Situation(g, value(kvs, know.SitPrefix+g), linked))
 	}
@@ -111,7 +111,7 @@ func value(kvs []store.KV, key string) string {
 // karma is a tool call that fits a situation's signature: the situation, its rules by key, and a linked library whole,
 // once a session. Each recognition is a row, so `chatlog events` can say which situations ever fire.
 func (d Deps) karma(ctx context.Context, in Input) (string, error) {
-	kvs, err := d.kv(ctx, know.SitPrefix)
+	kvs, err := d.kv(ctx, in, know.SitPrefix)
 	if err != nil {
 		return "", err
 	}
@@ -123,7 +123,7 @@ func (d Deps) karma(ctx context.Context, in Input) (string, error) {
 	var out []string
 	var errs []error
 	for _, g := range groups {
-		linked, err := d.Store.KVLinkedTo(ctx, know.SitPrefix+g, time.Time{})
+		linked, err := d.Store.KVLinkedTo(ctx, d.project(in), know.SitPrefix+g, time.Time{})
 		errs = append(errs, err)
 		out = append(out, know.Situation(g, value(kvs, know.SitPrefix+g), linked))
 		errs = append(errs, d.record(ctx, store.Event{Time: d.Now(), Event: EventKarma, Session: in.SessionID, Cwd: in.Cwd, Tool: in.ToolName, Input: know.SitPrefix + g}))
@@ -136,7 +136,7 @@ func (d Deps) karma(ctx context.Context, in Input) (string, error) {
 			if seen {
 				continue
 			}
-			rows, err := d.kv(ctx, know.LibPrefix+lib+"/")
+			rows, err := d.kv(ctx, in, know.LibPrefix+lib+"/")
 			errs = append(errs, err)
 			if len(rows) == 0 {
 				continue
@@ -160,7 +160,7 @@ func (d Deps) check(ctx context.Context, in Input) error {
 	if err != nil {
 		return err
 	}
-	kvs, err := d.kv(ctx, know.CheckPrefix)
+	kvs, err := d.kv(ctx, in, know.CheckPrefix)
 	if err != nil {
 		return err
 	}
