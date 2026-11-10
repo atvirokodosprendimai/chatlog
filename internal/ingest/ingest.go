@@ -108,8 +108,8 @@ func (in *Ingester) Scan(ctx context.Context) error {
 	return nil
 }
 
-// toRow is the pure part: redaction already done by the parser, cut here, outside any transaction.
-func (in *Ingester) toRow(e transcript.Exchange) store.Row {
+// ToRow is the pure part: redaction already done by the parser, cut here, outside any transaction.
+func (in *Ingester) ToRow(e transcript.Exchange) store.Row {
 	c := chunk.Build(e, in.Limit)
 	sum := sha256.Sum256([]byte(c.Full))
 	id := project.FromCwd(e.Cwd, in.Store) // never the override: this may be a server a fleet agent's call started
@@ -144,7 +144,7 @@ func (in *Ingester) File(ctx context.Context, path string) error {
 	held := 0
 	keep := func(e transcript.Exchange) {
 		if in.Since.IsZero() || e.Time.IsZero() || !e.Time.Before(in.Since) {
-			r := in.toRow(e)
+			r := in.ToRow(e)
 			rows = append(rows, r)
 			held += len(r.Text)
 		}

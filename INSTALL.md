@@ -128,6 +128,21 @@ server must be stopped) and `rm -r ~/.claude/projects/-tmp-smoke`.
 - The hooks also apply rules kept in your notes (always-on lines, situations that fire on a prompt or a tool call, checks
   of the last turn, a context meter): `chatlog seed` writes an example of each; README.md, "Knowledge in kv".
 
+## 9. A host that is not this machine (fleet agents)
+
+A remote host needs no data dir, no server and no hooks: its agent uses MCP only, and `chatlog mcp` talks to a socket
+without starting anything when `CHATLOG_AUTOSTART=0`. So forward the socket of the machine that holds the history:
+
+    # here, where the history is (chatlog doctor names the socket on its "server" line); remote path first, local path second
+    ssh -R /tmp/chatlog.sock:/path/to/chatlog.sock fleet-host
+
+Set `StreamLocalBindUnlink yes` in the remote host's `sshd_config`, or a socket file left by an earlier connection stops
+the next `-R`. On the remote host only the `chatlog` binary is needed (no `chatlog install`); register the MCP server with
+its environment: `CHATLOG_SOCKET=/tmp/chatlog.sock CHATLOG_AUTOSTART=0 CHATLOG_PROJECT=<project>-fleet`, command
+`chatlog mcp`. The agent's notes then stay in the project `<project>-fleet`, out of the wake digest and recall of
+`<project>`, and `kv_read project=<project>-fleet` reads them from there. No hook runs on that host, so nothing is
+ingested from it: what the agent should leave behind it writes with `kv_write`.
+
 ## Roll back
 
     chatlog install --uninstall       # or ./install.sh --uninstall, or the same piped from GitHub with -s -- --uninstall

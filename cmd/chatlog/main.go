@@ -56,6 +56,7 @@ search, status and mcp only talk to that socket. The hooks write SQLite themselv
   chatlog server [--source DIR]... [--once]   ingest and serve (--once: ingest, embed, exit)
   chatlog search QUERY [--since] [--repo] [--limit] [--json]
   chatlog status | events | export | forget
+  chatlog import-aam FILE [--team] [--wing]... [--project-of wing=project]...   read another memory's SQLite file into the history as archived rows
   chatlog mcp                                 stdio MCP: chat_search, chat_get, chat_tail, chat_status, kv_read, kv_write, kv_search, kv_link
   chatlog eval FILE                           score the retrieval variants
 
@@ -154,7 +155,7 @@ func main() {
 			&cli.StringFlag{Name: "socket", Sources: cli.EnvVars("CHATLOG_SOCKET"), Usage: "default: a short per-data-dir path under $XDG_RUNTIME_DIR, else the temp dir"},
 		},
 		Commands: []*cli.Command{serverCmd(cfg), searchCmd(), statusCmd(), mcpCmd(), hookCmd(cfg, cfgErr), ingestCmd(cfg), eventsCmd(),
-			installCmd(), doctorCmd(cfg), wakeCmd(cfg), seedCmd(), projectCmd(), forgetCmd(), exportCmd(), evalCmd(), {
+			installCmd(), doctorCmd(cfg), wakeCmd(cfg), seedCmd(), projectCmd(), importAAMCmd(), forgetCmd(), exportCmd(), evalCmd(), {
 				Name: "instructions", Usage: "what it is for and how to read its output (--core: the rules alone)",
 				Flags: []cli.Flag{&cli.BoolFlag{Name: "core", Usage: "print only the rules every session follows; the same text the MCP server gives at initialize"}},
 				Action: func(_ context.Context, cmd *cli.Command) error {

@@ -77,3 +77,18 @@ func TestProjectCommandListsNamesAndKeepsOneKeyPerName(t *testing.T) {
 		t.Fatalf("the override:\n%s", out)
 	}
 }
+
+// A remote host runs `chatlog mcp` against a forwarded socket and has no data dir, no server and no hooks: the command
+// must answer, create nothing, and start nothing.
+func TestMCPNeedsNoLocalDataDir(t *testing.T) {
+	h := newHome(t)
+	data := h.path("no-such-dir/data")
+	h.env = append(h.env, "CHATLOG_DIR="+data, "CHATLOG_SOCKET="+h.path("forwarded.sock"), "CHATLOG_PROJECT=webshop-fleet")
+	out, err := h.run(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`+"\n", "mcp")
+	if err != nil || !strings.Contains(out, "How to use chatlog") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Dir(data)); err == nil {
+		t.Fatalf("chatlog mcp created %s on a host that has no data dir", filepath.Dir(data))
+	}
+}

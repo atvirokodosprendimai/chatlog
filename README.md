@@ -54,7 +54,8 @@ A container image exists for running the MCP server without installing anything:
   when an embedder is configured, and answers searches on a unix socket (mode 0600). `chatlog mcp` starts it when
   nothing answers and it exits after 2 idle hours, so there is no service to install (`CHATLOG_AUTOSTART=0` turns
   that off; `chatlog server --stop` stops it).
-- **MCP** (`chatlog mcp`): `chat_search`, `chat_get`, `chat_tail`, `chat_status` over the history; `kv_read`,
+- **MCP** (`chatlog mcp`): `chat_search`, `chat_get`, `chat_tail`, `chat_status` over the history, `chat_archive` to restore
+  an archived row; `kv_read`,
   `kv_write`, `kv_search`, `kv_link` for the session's own short notes. At initialize it sends the rules of use
   (`chatlog instructions --core`).
 - **Skill** (`~/.claude/skills/chatlog/SKILL.md`): loads on "recall", "what did we decide", "where did we stop", after a
@@ -79,6 +80,22 @@ Archive: a row can be archived, kept but hidden from every read (`chat_search`, 
     chatlog status
 
 A hit is what was said then, not the state now: check it against the code.
+
+## Importing another memory
+
+    chatlog import-aam FILE [--team T] [--wing W]... [--project-of wing=project]... [--dry-run]
+
+Reads the SQLite file of a memory that keeps verbatim drawers and facts mined from them, read-only and streamed (a file
+of hundreds of megabytes is never loaded whole), and stores each drawer as one **archived** row through the same path an
+exchange takes: its chunks joined back into one text (the overlap of neighbours dropped), the facts it was mined from
+appended as `subject predicate object (valid ...)` lines, an ended drawer marked `[ENDED date: reason; superseded by id]`,
+the text redacted like any other, and a vector made by the server's embedder from the ordinary queue (`chatlog status`
+shows them pending). Facts no drawer holds become documents of their own, grouped by source file, 40 to a document, in the
+project named by the pseudo-wing `facts`. Vectors, closets and every other table of the file are ignored. A wing's project
+is its name without `wing_`, or what `--project-of wing=project` says; `--wing` limits the import to some wings. Safe to
+repeat: a drawer is stored once by its id, a second run changes nothing, and a row someone restored is not archived again.
+The rows keep the links that joined them in the source (a shared entity of a fact, the same source file, a replaced
+version); `chat_archive` lists them when it restores one row. `chatlog search --archive` finds them meanwhile.
 
 ## Search quality
 
