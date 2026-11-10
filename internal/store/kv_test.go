@@ -108,3 +108,21 @@ func TestKVWriteWarnsPastTheSoftLimitAndKeepsTheValue(t *testing.T) {
 		t.Fatalf("exactly the soft limit is fine: %v", warn)
 	}
 }
+
+func TestKVHasCountsADeletedKey(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	if _, err := s.KVWrite(ctx, map[string]string{"a": "1", "b": "2"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.KVWrite(ctx, nil, []string{"b"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.KVHas(ctx, []string{"a", "b", "c"})
+	if err != nil || !got["a"] || !got["b"] || got["c"] || len(got) != 2 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got, _ := s.KVHas(ctx, nil); len(got) != 0 {
+		t.Fatal(got)
+	}
+}

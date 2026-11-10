@@ -235,3 +235,28 @@ func (s *Store) KVLatest(ctx context.Context, rids []int64, prefix string) (map[
 	}
 	return out, rows.Err()
 }
+
+// KVHas returns which of keys have ever been written, a deleted one included: a key the user deleted is theirs to have deleted.
+func (s *Store) KVHas(ctx context.Context, keys []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		args[i] = k
+	}
+	rows, err := s.r.QueryContext(ctx, `SELECT DISTINCT key FROM kv WHERE key IN (`+strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = true
+	}
+	return out, rows.Err()
+}

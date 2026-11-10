@@ -50,7 +50,7 @@ turn's misses, context, recall; `karma` adds to `PreToolUse` when a tool call fi
 `Karma` row per recognition, a `KarmaLib` row when a library is printed); `check` at `Stop` audits the turn and stores its
 misses in a `Check` row, printed at the next prompt and then cleared by an empty row. Only `prompt`'s search by meaning
 needs the server: the call has a budget of 1.5 s and is skipped, and logged, past it or when the server is down. Measured
-on dc-ocr1 (Linux, 64 cores), wall clock around the whole process, p50 of 40 to 100 runs, a data dir with 3900 notes of
+on a 64-core Linux host, wall clock around the whole process, p50 of 40 to 100 runs, a data dir with 3900 notes of
 which 300 situations with a signature each, the server running with an embedder stand-in that answers at once (a real
 embedder adds its own time):
 

@@ -56,7 +56,7 @@ func wakeCmd(cfg config.File) *cli.Command {
 func seedCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "seed",
-		Usage: "write the starter notes (the playbook's rules under rule/ tool/ legend/) where a key is absent; safe to repeat",
+		Usage: "write the starter notes (the playbook's rules under rule/ tool/ legend/, and one example each of hook/ and sit/) where a key is absent; safe to repeat",
 		Flags: []cli.Flag{&cli.BoolFlag{Name: "dry-run", Usage: "list what would be written"}},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			st, err := openStore(cmd, 10*time.Second)
@@ -92,13 +92,13 @@ func missingSeeds(ctx context.Context, st *store.Store) ([]playbook.Note, error)
 	for i, n := range playbook.Seed {
 		keys[i] = n.Key
 	}
-	have, err := st.KVRead(ctx, keys, nil, time.Time{})
+	have, err := st.KVHas(ctx, keys)
 	if err != nil {
 		return nil, err
 	}
 	var out []playbook.Note
 	for _, n := range playbook.Seed {
-		if !slices.ContainsFunc(have, func(kv store.KV) bool { return kv.Key == n.Key }) {
+		if !have[n.Key] {
 			out = append(out, n)
 		}
 	}

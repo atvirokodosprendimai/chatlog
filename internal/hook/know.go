@@ -77,7 +77,7 @@ func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV) (parts []str
 	if d.Recall != nil && know.WantRecall(in.Prompt) {
 		rctx, cancel := context.WithTimeout(ctx, recallBudget)
 		start := time.Now()
-		hits, err := d.Recall(rctx, in.Prompt, 10)
+		hits, err := d.Recall(rctx, in.Prompt, 30)
 		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("prompt recall skipped after %d ms: %w", time.Since(start).Milliseconds(), err))

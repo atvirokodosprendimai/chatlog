@@ -20,7 +20,7 @@ var ruleKey = regexp.MustCompile(`^hook/check/rule/[^/]+$`)
 // The user's own checks are notes: hook/check/rule/<n> = "TOOLRX :: INRX :: message" says "a call like this is a miss".
 var (
 	// builtinSkip are prompts that are not the person's: the harness speaking.
-	builtinSkip = []string{"<system-reminder>", "<task-notification>"}
+	builtinSkip = []string{"<system-reminder>", "<task-notification>", "<command-message>", "<command-name>"}
 	// builtinBare are answers that carry no subject to recall; hook/check/bare adds to them.
 	builtinBare = []string{"ok", "okay", "yes", "no", "y", "n", "thanks", "continue"}
 	// changeTools are the tools that change state by themselves; Cron* too. A shell command is a change only when a

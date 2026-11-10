@@ -118,6 +118,9 @@ func TestMissesAreShownOnceThenCleared(t *testing.T) {
 	if got, _ := r.prompt("s1", "and again please now", tp); strings.Contains(got, "last turn missed") {
 		t.Fatalf("shown twice: %q", got)
 	}
+	if got, _ := r.prompt("s1", "and once more please now", tp); strings.HasSuffix(got, "\n") || strings.Contains(got, "\n\n") {
+		t.Fatalf("a cleared miss leaves no empty line: %q", got)
+	}
 	r.stop("s1", tp)
 	if got, _ := r.prompt("other", "a session of its own", tp); strings.Contains(got, "last turn missed") {
 		t.Fatalf("crossed sessions: %q", got)
@@ -406,5 +409,24 @@ func TestASlowServerCostsAtMostTheBudget(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "prompt recall skipped after") || !strings.Contains(got, "hook/prompt/01: always") || !strings.Contains(got, "situation sit/g") {
 		t.Fatalf("%v %q", err, got)
+	}
+}
+
+func TestKarmaPrintsNoLibraryWithoutASession(t *testing.T) {
+	r := newRig(t)
+	r.kv("sit/prod", "prod | read first", "sit/prod/sig/1", `Bash :: ssh`, "legend/lib/hosts", "x", "lib/hosts/1", "ssh h1 uptime")
+	r.link("legend/lib/hosts", "sit/prod")
+	got, _ := r.pre("", "Bash", `{"command":"ssh h1"}`)
+	if !strings.Contains(got, "sit/prod") || strings.Contains(got, "lib/hosts (loaded") {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestACommandTurnIsNotAudited(t *testing.T) {
+	r := newRig(t)
+	cmd := `{"type":"user","message":{"role":"user","content":"<command-message>x is running</command-message>\n<command-name>/x</command-name>"}}`
+	r.stop("s1", r.transcript(cmd, editLine))
+	if got, _ := r.prompt("s1", "what happened in that run", ""); strings.Contains(got, "last turn missed") {
+		t.Fatalf("%q", got)
 	}
 }

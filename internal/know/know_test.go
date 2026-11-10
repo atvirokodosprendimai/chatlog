@@ -42,6 +42,7 @@ func TestSigsMatchTheToolWholeAndTheInputAsTheNoteSays(t *testing.T) {
 		{"two signatures of one group count once", "Bash", "git push origin main", []string{"push"}},
 		{"the tool is a full match, not a prefix", "BashOutput", "git push", nil},
 		{"a line start inside a command", "Bash", "cd x\ngo test ./...", []string{"tests"}},
+		{"a prefix of the tool name is not the tool", "xBash", "git push", nil},
 		{"not at a line start", "Bash", "echo go test", nil},
 		{"alternation of tools", "Write", `{"file_path":"/a/.env"}`, []string{"edit"}},
 		{"another tool of the alternation", "Read", `{"file_path":"/a/.env"}`, nil},
@@ -85,6 +86,9 @@ func TestWordsMatchThePromptCaseInsensitively(t *testing.T) {
 	words, bad := ParseWords(kvs("sit/rel/words/1", `release|ship it`, "sit/rel/words/2", `deploy`, "sit/x/words/1", `(`, "sit/x/sig/1", "Bash :: a"))
 	if !slices.Equal(bad, []string{"sit/x/words/1"}) || len(words) != 2 {
 		t.Fatalf("words %d bad %v", len(words), bad)
+	}
+	if got := MatchWords(words, "Please SHIP IT"); !slices.Equal(got, []string{"rel"}) {
+		t.Errorf("the pattern is case-insensitive: %v", got)
 	}
 	if got := MatchWords(words, "Please SHIP IT and deploy"); !slices.Equal(got, []string{"rel"}) {
 		t.Errorf("one group once: %v", got)
@@ -139,7 +143,7 @@ func TestPickRecallRanksCutsAndSkips(t *testing.T) {
 }
 
 func TestWantRecallNeedsThreeWords(t *testing.T) {
-	for p, want := range map[string]bool{"": false, "ok": false, "op taip": false, "what is t119": true, "  a\tb\nc ": true} {
+	for p, want := range map[string]bool{"": false, "ok": false, "ok then": false, "what is item7": true, "  a\tb\nc ": true} {
 		if WantRecall(p) != want {
 			t.Errorf("%q", p)
 		}
@@ -190,7 +194,7 @@ func TestStarterNotesWork(t *testing.T) {
 	if got := Audit(turn, rules); len(got) != 1 || !strings.Contains(got[0], "read through the shell") {
 		t.Errorf("%v", got)
 	}
-	if got := Audit(Turn{Prompt: turn.Prompt, Uses: []Use{bash("mrw read internal/a.go")}}, rules); len(got) != 0 {
+	if got := Audit(Turn{Prompt: turn.Prompt, Uses: []Use{bash("filetool read internal/a.go")}}, rules); len(got) != 0 {
 		t.Errorf("%v", got)
 	}
 }

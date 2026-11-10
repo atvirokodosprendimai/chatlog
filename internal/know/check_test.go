@@ -19,7 +19,7 @@ func bash(cmd string) Use {
 
 func TestAudit(t *testing.T) {
 	rules, bad := ParseRules(kvs(
-		"hook/check/skip/1", "fleet tick",
+		"hook/check/skip/1", "nightly tick",
 		"hook/check/change/1", `git +push|deploy\.sh`,
 		"hook/check/bare", "Status, na?",
 		"hook/check/rule/1", `Bash :: (^|[|;&]\s*)(cat|head|sed -n)\s+\S+\.(go|md) :: file read through the shell`,
@@ -47,12 +47,15 @@ func TestAudit(t *testing.T) {
 		{"a short prompt answered without tools", Turn{"why?", nil}, nil, true},
 		{"a bare built-in answer", Turn{"OK.", []Use{bash("ls")}}, nil, true},
 		{"a bare answer from the note", Turn{"Status!", []Use{bash("ls")}}, nil, true},
+		{"six words is still short", Turn{"one two three four five six", []Use{bash("ls")}}, []string{"short prompt"}, false},
+		{"a harness tag later in the prompt is not a skip", Turn{"see <system-reminder> then edit", []Use{bash("ls")}}, []string{"short prompt"}, false},
 		{"seven words is not short", Turn{"one two three four five six seven", []Use{bash("ls")}}, nil, true},
 		{"harness prompts are not audited", Turn{"<system-reminder> x", []Use{use("Edit", `{}`)}}, nil, true},
 		{"task notifications neither", Turn{"<task-notification>x", []Use{use("Edit", `{}`)}}, nil, true},
-		{"a prefix from the notes", Turn{"fleet tick 12", []Use{use("Edit", `{}`)}}, nil, true},
+		{"a prefix from the notes", Turn{"nightly tick 12", []Use{use("Edit", `{}`)}}, nil, true},
 		{"a user rule", Turn{long, []Use{bash("cat main.go")}}, []string{"file read through the shell"}, false},
 		{"a user rule after a pipe", Turn{long, []Use{bash("ls | head x.md")}}, []string{"file read through the shell"}, false},
+		{"a user rule counted twice", Turn{long, []Use{bash("cat a.go"), bash("cat c.md")}}, []string{"file read through the shell (2 calls)"}, false},
 		{"a user rule counted", Turn{long, []Use{bash("cat a.go"), bash("head b.md"), bash("cat c.md")}}, []string{"file read through the shell (3 calls)"}, false},
 		{"a user rule needs its tool", Turn{long, []Use{use("Read", `{"command":"cat a.go"}`)}}, nil, true},
 		{"a user rule on another tool", Turn{long, []Use{use("Edit", `{"file_path":"go.LOCK"}`), use("kv_write", `{}`)}}, []string{"a lock file edited by hand"}, false},
