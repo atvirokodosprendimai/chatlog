@@ -4,11 +4,6 @@
 package know
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
-	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -24,9 +19,6 @@ var (
 	onKey    = regexp.MustCompile(`^sit/([^/]+)/on/[^/]+$`)
 	armedKey = regexp.MustCompile(`^sit/([^/]+)/armed$`)
 )
-
-// maxReminders is how many owed situations a prompt names; the rest are counted.
-const maxReminders = 3
 
 // On is one event pattern of a situation.
 type On struct {
@@ -109,34 +101,4 @@ func laterOf(a, b time.Time) time.Time {
 		return b
 	}
 	return a
-}
-
-// Reminder is the line an owed situation puts on a prompt: short, naming the command that loads and the key that finishes.
-func Reminder(a Arm, dir string) string {
-	src := a.Source // the hook's input, free text: clipped so the line keeps its size
-	if len(src) > 16 {
-		src = strings.ToValidUTF8(src[:16], "")
-	}
-	return fmt.Sprintf("WAKE NOT DONE (%s, since %s): run chatlog wake --dump %s, read EVERY page in ONE turn in parallel, then kv_write %s = its LOADED line and tell the user it. Repeats each prompt until done.",
-		src, a.Since.UTC().Format(time.RFC3339), dir, DoneKey(a.Group))
-}
-
-// Reminders is the lines for the owed situations, the first three, then a count of the rest; "" when nothing is owed.
-func Reminders(arms []Arm, dir string) string {
-	var lines []string
-	for i, a := range arms {
-		if i == maxReminders {
-			lines = append(lines, fmt.Sprintf("(+%d more owed: kv_read prefix sit/ and look for /armed)", len(arms)-maxReminders))
-			break
-		}
-		lines = append(lines, Reminder(a, dir))
-	}
-	return strings.Join(lines, "\n")
-}
-
-// DumpDir is where `chatlog wake --dump` puts a project's pages, and where the reminder tells the session to look: one per
-// project, so two sessions waking at once do not overwrite each other's pages.
-func DumpDir(project string) string {
-	sum := sha1.Sum([]byte(project))
-	return filepath.Join(os.TempDir(), "chatlog-wake-"+hex.EncodeToString(sum[:4]))
 }

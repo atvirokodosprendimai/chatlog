@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // wakeRig has the wake situation as M's notes would hold it: global, so every project has it.
@@ -134,5 +135,62 @@ func TestPromptPieceOffSilencesTheWake(t *testing.T) {
 	r.off()
 	if out := r.promptIn("/u/a", "x"); strings.Contains(out, "WAKE") {
 		t.Fatalf("armed while the piece was off? the event came while it was off: %q", out)
+	}
+}
+
+// review: an owed situation the prompt's words name is printed once, not twice
+func TestAnOwedSituationTheWordsNameIsPrintedOnce(t *testing.T) {
+	r := wakeRig(t)
+	r.kvIn("global", map[string]string{"sit/醒/words/1": "wake"})
+	r.start("/u/a", "compact")
+	if got := r.promptIn("/u/a", "please wake up"); strings.Count(got, "situation sit/醒") != 1 {
+		t.Fatalf("%q", got)
+	}
+}
+
+// review: only the situations the reminder prints whole are skipped by the words; the 4th and later still print when named
+func TestOwedBeyondThePrintedThreeStillPrintWhenTheWordsNameThem(t *testing.T) {
+	r := newRig(t)
+	set := map[string]string{}
+	for _, g := range []string{"a", "b", "c", "d"} {
+		set["sit/"+g] = g + " | move"
+		set["sit/"+g+"/on/1"] = "compact"
+		set["sit/"+g+"/words/1"] = "word" + g
+	}
+	r.kv("sit/a", "a | move")
+	r.kvIn("global", set)
+	r.start("", "compact")
+	got, _ := r.prompt("s1", "wordd please", "")
+	if strings.Count(got, "WAKE NOT DONE") != 3 || !strings.Contains(got, "(+1 more owed") || !strings.Contains(got, "situation sit/d d | move") {
+		t.Fatalf("%q", got)
+	}
+	if strings.Count(got, "situation sit/") != 4 {
+		t.Fatalf("three owed whole and the named fourth: %q", got)
+	}
+}
+
+// review: a done written to the global notes (global/sit/<g>/done) after a project's own older done finishes the wake
+func TestAGlobalDoneFinishesWhatTheProjectsOlderDoneDoesNot(t *testing.T) {
+	r := wakeRig(t)
+	r.kvIn("path:/u/a", map[string]string{"sit/醒/done": "old"})
+	r.start("/u/a", "compact")
+	if got := r.promptIn("/u/a", "x"); !strings.Contains(got, "WAKE NOT DONE") {
+		t.Fatalf("an older done does not finish a later arm: %q", got)
+	}
+	r.kvIn("global", map[string]string{"sit/醒/done": "LOADED"})
+	if got := r.promptIn("/u/a", "x"); strings.Contains(got, "WAKE") {
+		t.Fatalf("%q", got)
+	}
+}
+
+// review: the same source twice is two events: the arm value carries the time, so the second is a new row
+func TestTheSameSourceTwiceArmsAgain(t *testing.T) {
+	r := wakeRig(t)
+	r.start("/u/a", "compact")
+	r.done("path:/u/a", "LOADED")
+	r.now = r.now.Add(time.Minute)
+	r.start("/u/a", "compact")
+	if got := r.promptIn("/u/a", "x"); !strings.Contains(got, "WAKE NOT DONE (compact") {
+		t.Fatalf("%q", got)
 	}
 }

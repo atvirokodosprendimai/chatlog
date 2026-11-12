@@ -36,11 +36,13 @@ searchable, versioned) are the only place a new machine needs.
 
 1. A hook exits 0 and stays inside its timeout (10 s; its own budget is 3 s). A failed arm is logged, never raised.
 2. Nothing armed: the prompt's context has no wake line and no extra read (the notes under `sit/` are read already).
-3. An armed reminder is at most 400 bytes per group, at most 3 groups, and names `chatlog wake`.
+3. An armed reminder is at most 400 bytes per group, names at most 3 groups and then counts the rest in one more short
+   line, and names `chatlog wake`. The SessionStart source it quotes is cut to 16 bytes.
 4. Additive only: no schema change; a new key shape (`on/`, `armed`, `done`, `global/wake/`) that an older binary does
    not read and does not mind. A situation without `on/` behaves as before.
 5. Done is the notes' own time: `done` newer than `armed` by the stamp the store gave each write; clocks of two machines
-   are not compared.
+   are not compared (a clock stepped back between the two writes keeps the reminder until it catches up). A `done` in
+   the project's notes and one under `global/` both count, the later of the two.
 6. `chatlog wake` with a wake list prints the list; without one it prints the digest as before; `--digest`, `--kind`
    and `--bytes` ask for the digest (nothing that worked is refused).
 7. A page is at most 24000 bytes and the pages joined are the content; a dump dir is made 0700, is never a link, and
@@ -53,3 +55,12 @@ searchable, versioned) are the only place a new machine needs.
 
 Install chatlog (`chatlog install`), then `chatlog wake load docs/wake-list.txt` (the list and the situation: edit the
 paths first). Nothing else lives outside the notes.
+
+## What is not promised (decided, not forgotten)
+
+- The wake is owed **per project, not per session**: two sessions of one project share `sit/<g>/armed`, so the first
+  `done` written after the last arm finishes it for both. A per-session state would need a session key in the notes; the
+  cost of the shared one is a session that skips its load when another finished first.
+- The arm is one kv write in the hook's 1 s lock wait; it is not spooled as event rows are. A lock held longer loses the
+  arm for that event, and the hook logs it in `hooks.log`. The next SessionStart arms again.
+- A group name is a path segment of at most about 115 bytes; a longer one is refused by the notes' own key limit.

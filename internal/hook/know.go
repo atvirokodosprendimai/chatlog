@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/atvirokodosprendimai/chatlog/internal/config"
 	"github.com/atvirokodosprendimai/chatlog/internal/know"
 	"github.com/atvirokodosprendimai/chatlog/internal/store"
+	"github.com/atvirokodosprendimai/chatlog/internal/wake"
 )
 
 // Events the knowledge pieces write beside the hooks' own rows, so `chatlog events` shows them.
@@ -41,14 +43,22 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 			errs = append(errs, err)
 		}
 	}
+	printed := map[string]bool{} // the owed situations the reminder prints whole
 	if h.On(config.PiecePrompt) {
 		owed := know.Owed(kvs)
 		if len(owed) > 0 {
-			parts = append(parts, know.Reminders(owed, know.DumpDir(d.project(in))))
-			for _, a := range owed[:min(len(owed), 3)] {
+			// a done written to the global notes counts too, and a project's own done hides it from the merged read
+			global, err := d.Store.KVRead(ctx, store.GlobalProject, nil, []string{store.GlobalPrefix + know.SitPrefix}, time.Time{})
+			errs = append(errs, err)
+			owed = know.Owed(append(slices.Clone(kvs), global...))
+		}
+		if len(owed) > 0 {
+			parts = append(parts, wake.Reminders(owed, wake.DumpDir(d.project(in))))
+			for _, a := range owed[:min(len(owed), wake.MaxReminders)] {
 				line, err := d.situation(ctx, in, kvs, a.Group)
 				errs = append(errs, err)
 				parts = append(parts, line)
+				printed[a.Group] = true
 			}
 		}
 	}
@@ -75,7 +85,7 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 		}
 	}
 	if h.On(config.PiecePrompt) {
-		p, es := d.recall(ctx, in, kvs)
+		p, es := d.recall(ctx, in, kvs, printed)
 		parts = append(parts, p...)
 		errs = append(errs, es...)
 	}
@@ -84,7 +94,7 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 
 // recall is the notes found by the prompt's words, then the situations its words name. The search needs the embedder
 // and so the server: when that does not answer in time it is skipped and logged, the situations stay.
-func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV) (parts []string, errs []error) {
+func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV, printed map[string]bool) (parts []string, errs []error) {
 	if d.Recall != nil && know.WantRecall(in.Prompt) {
 		rctx, cancel := context.WithTimeout(ctx, recallBudget)
 		start := time.Now()
@@ -100,12 +110,8 @@ func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV) (parts []str
 	_, badS := know.ParseSigs(kvs)
 	_, badC := know.ParseRules(kvs)
 	_, badO := know.ParseOns(kvs)
-	owed := map[string]bool{}
-	for _, a := range know.Owed(kvs) {
-		owed[a.Group] = true
-	}
 	for _, g := range know.MatchWords(words, in.Prompt) {
-		if owed[g] {
+		if printed[g] {
 			continue // already printed whole with its reminder
 		}
 		line, err := d.situation(ctx, in, kvs, g)
