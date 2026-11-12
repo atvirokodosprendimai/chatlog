@@ -1,0 +1,26 @@
+# The wake list of one machine (docs/wake.md): `chatlog wake load docs/wake-list.txt` writes it into the global notes and
+# replaces the list before. file = a path read whole (~, $HOME, $PWD expand; a missing one is printed MISSING),
+# prefix = a kv prefix read with full 1, step = a free line, note = a key written as it is (the situation that arms the wake).
+# Edit the paths to the machine (an example; the paths below are not real).
+file ~/notes/CLAUDE.md
+file ~/notes/global/behavior.md
+file ~/notes/global/human.md
+file ~/notes/global/think/answering.md
+file ~/notes/global/think/learned.md
+file ~/notes/global/fleet.md
+file ~/notes/reference/how-we-think.md
+file ~/notes/reference/what-exists.md
+file $PWD/CLAUDE.md
+prefix rule/
+prefix known/
+prefix lesson/
+prefix tool/
+prefix hook/
+prefix sit/
+prefix legend/
+prefix lib/
+step state: kv_read now/ waits/ day/<today>/ todo/future/ (stale ones: say stale, check the source)
+step skills: quality-harness:adr-write and adr-execute (Skill tool), then adr-state.mjs in both repos
+step chat: chat_tail back with next_before for the last ~250k of the day
+note sit/wake wake | load the whole wake list: chatlog wake --dump, read every page in one turn, then kv_write sit/wake/done = the LOADED line
+note sit/wake/on/1 startup|compact|clear

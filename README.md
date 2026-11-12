@@ -50,6 +50,12 @@ A container image exists for running the MCP server without installing anything:
 - **Wake** (`chatlog wake --kind compact|clear|start`): at session start the hook injects a bounded digest (24000 bytes
   by default): the rule above, your notes, the latest exchanges with their tool calls, and the exact calls that fetch
   more. A compaction gets the most, a `/clear` only the notes.
+- **Wake, whole** (`chatlog wake`, [docs/wake.md](docs/wake.md)): the wake list is three kinds of note in the global notes
+  (`global/wake/file/<n>` a path, `global/wake/prefix/<n>` a kv prefix, `global/wake/step/<n>` a free line), so every
+  project and every machine that shares the notes loads the same. A situation with `sit/<g>/on/<n>` = `startup|compact|clear`
+  is armed by that event and every later prompt, the user's or a cron tick, says `WAKE NOT DONE` until a `kv_write` of
+  `sit/<g>/done` (the LOADED line) is newer. `chatlog wake --dump DIR` writes the list into pages of at most 24000 bytes to
+  read in one parallel turn. A new machine: install chatlog, then `chatlog wake load docs/wake-list.txt`.
 - **Server** (`chatlog server`): keeps the database current from every transcript (a scan every 30 s), makes vectors
   when an embedder is configured, and answers searches on a unix socket (mode 0600). `chatlog mcp` starts it when
   nothing answers and it exits after 2 idle hours, so there is no service to install (`CHATLOG_AUTOSTART=0` turns
@@ -175,6 +181,7 @@ cause and its consequence, not a list of faults: it is whatever you want to happ
     chatlog doctor                              check the install
     chatlog hook EVENT                          what the hooks run (stdin: the event's JSON)
     chatlog wake --kind compact|clear|start     the session-start digest
+    chatlog wake [--dump DIR] | load FILE       the wake list loaded whole (pages, LOADED counts) / written from a file
     chatlog seed [--dry-run]                    the starter notes, where absent
     chatlog ingest --all | FILE...              read existing transcripts once, from where each was left
     chatlog server [--once] [--idle D] [--stop] ingest, embed, serve the socket

@@ -59,6 +59,7 @@ search, status and mcp only talk to that socket. The hooks write SQLite themselv
   chatlog import-aam FILE [--team] [--wing]... [--project-of wing=project]...   read another memory's SQLite file into the history as archived rows
   chatlog mcp                                 stdio MCP: chat_search, chat_get, chat_tail, chat_status, kv_read, kv_write, kv_search, kv_link
   chatlog eval FILE                           score the retrieval variants
+  chatlog wake [--dump DIR] | load FILE       the owed wake loaded whole (the list in the notes), or the recovery digest when there is no list
 
 Reading a search result:
   score    the reranker's when it ran (0..1), else the fused rank; compare within one result only
@@ -111,6 +112,14 @@ Knowledge in kv (the hooks apply these notes; a new rule is a kv_write, never a 
                            JSON), per line, case-insensitive: a match fires sit/<g> before the call
   kv_link rule applies_to sit/<g>   the rule's key is printed with the situation; legend/lib/<n> linked the same way
                            prints every lib/<n>/* once a session
+  sit/<g>/on/<n>           a regex that must match the whole SessionStart source (startup, resume, clear, compact): "startup|compact|clear". The event
+                           ARMS sit/<g> for the project (the hook writes sit/<g>/armed); from then every prompt (the user's, a cron tick)
+                           carries a WAKE NOT DONE line and the situation until sit/<g>/done is written, value the LOADED line, later
+                           than the arm; a second event arms it again. Without on/ keys a situation fires per match and is not sticky.
+  global/wake/file/<n>     a path to load whole (~, $HOME, $PWD expand; a missing file is printed MISSING); global/wake/prefix/<n> a kv prefix to
+                           read with full 1; global/wake/step/<n> a free line. `chatlog wake` prints the list with line counts and the LOADED
+                           line to answer with; `chatlog wake --dump DIR` writes it into pages of at most 24000 bytes, read all in ONE parallel turn;
+                           `chatlog wake load FILE` writes the list from a file (docs/wake.md). Without a list `chatlog wake` is the digest.
   hook/check/rule/<n>      "TOOLRX :: INRX :: message": a turn that made such a call is told message at the next prompt
   hook/check/change/<n>    a regex over Bash commands that counts as a state change (with no kv_write: a miss)
   hook/check/bare, hook/check/skip/<n>   answers that need no recall (comma list), prompt prefixes not audited
