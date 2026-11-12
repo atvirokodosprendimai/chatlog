@@ -250,7 +250,7 @@ func TestAListedFileOutsideHomeAndProjectOrSecretByNameIsRefused(t *testing.T) {
 		os.WriteFile(p, []byte(s), 0o600)
 	}
 	os.Symlink(key, filepath.Join(work, "NOTES.md")) // a hostile repo's link to the key
-	l := List{Files: []string{good, key, env, out, "/etc/hosts"}}
+	l := List{Files: []string{good, key, env, out}} // out is the outside-the-home case: a file of our own, so no host file is assumed
 	r, err := Build(context.Background(), listStore(t), "webshop", l, home, work)
 	if err != nil {
 		t.Fatal(err)
@@ -261,10 +261,10 @@ func TestAListedFileOutsideHomeAndProjectOrSecretByNameIsRefused(t *testing.T) {
 			t.Errorf("%q was read:\n%s", secret, c)
 		}
 	}
-	if !strings.Contains(c, "fine") || strings.Count(c, "=== REFUSED") != 4 {
-		t.Errorf("one read, four refused:\n%s", c)
+	if !strings.Contains(c, "fine") || strings.Count(c, "=== REFUSED") != 3 {
+		t.Errorf("one read, three refused:\n%s", c)
 	}
-	if got := r.Loaded(); !strings.Contains(got, "files=1/5") {
+	if got := r.Loaded(); !strings.Contains(got, "files=1/4") {
 		t.Errorf("%s", got)
 	}
 	// each of these names the key by another road: a link inside the project, a .. through the home
