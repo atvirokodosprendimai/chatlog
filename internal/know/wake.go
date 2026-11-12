@@ -58,8 +58,9 @@ func ParseOns(kvs []store.KV) (ons []On, bad []string) {
 		if m == nil {
 			continue
 		}
+		_, alone := regexp.Compile(e.Value) // alone first: a value that closes its own group would escape the whole-source wrapper
 		rx, err := regexp.Compile(`^(?:` + e.Value + `)$`)
-		if err != nil || strings.TrimSpace(e.Value) == "" {
+		if alone != nil || err != nil || strings.TrimSpace(e.Value) == "" {
 			bad = append(bad, e.Key)
 			continue
 		}

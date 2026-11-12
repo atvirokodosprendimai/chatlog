@@ -96,3 +96,30 @@ func TestReminderTextOverManyGroupsIsThreeLinesAndACount(t *testing.T) {
 		t.Fatal("nothing owed, nothing said")
 	}
 }
+
+// review: a value that closes its own group must not break the whole-source rule (^(?:resume)|(.*)$ matches "startup")
+func TestOnPatternCannotEscapeItsWholeMatchWrapper(t *testing.T) {
+	ons, bad := ParseOns(kvs("sit/g/on/1", "resume)|(.*", "sit/g/on/2", "q)|(p"))
+	if len(ons) != 0 || len(bad) != 2 {
+		t.Fatalf("ons %v bad %v", ons, bad)
+	}
+}
+
+// review: the source is the hook's input, free text; it must not push the reminder over its size
+func TestReminderClipsAFreeSource(t *testing.T) {
+	m := Reminder(Arm{Group: strings.Repeat("g", 100), Source: strings.Repeat("醒", 100)}, "/tmp/chatlog-wake-ab12cd34")
+	if len(m) > 400 || !utf8.ValidString(m) {
+		t.Fatalf("%d bytes: %q", len(m), m)
+	}
+}
+
+// review: a done written in the other scope (global/sit/<g>/done) counts, the later of the two
+func TestOwedTakesTheLaterOfTwoDoneRows(t *testing.T) {
+	t0 := time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
+	rows := []store.KV{armKV("a", "clear", t0),
+		{Key: DoneKey("a"), Value: "x", Time: t0.Add(-time.Hour)},
+		{Key: DoneKey("a"), Value: "y", Time: t0.Add(time.Second), Project: "global"}}
+	if got := Owed(rows); len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+}
