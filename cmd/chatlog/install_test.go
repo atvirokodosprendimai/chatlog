@@ -403,7 +403,10 @@ func TestInstallScript(t *testing.T) {
 	if err != nil || !strings.Contains(out, "ok    every hook on a synthetic event") || !strings.Contains(out, "files read") {
 		t.Fatalf("install.sh: %v\n%s", err, out)
 	}
-	realBin, _ := filepath.EvalSymlinks(h.path("bin")) // install resolves links: a temp dir may be one (macOS)
+	realBin, err := filepath.EvalSymlinks(h.path("bin")) // install resolves links: a temp dir may be one (macOS)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if s := h.read(".claude/settings.json"); !strings.Contains(s, h.path("bin/chatlog")+" hook Stop") && !strings.Contains(s, realBin+"/chatlog hook Stop") {
 		t.Fatal("settings do not run the installed binary")
 	}
