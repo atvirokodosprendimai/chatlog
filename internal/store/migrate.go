@@ -14,6 +14,8 @@ import (
 // was), and not archived on an exchange. Nothing is rewritten, so an older version of the file's rows read the same.
 var addedColumns = []struct{ table, col, ddl string }{
 	{"exchanges", "pkey", "TEXT NOT NULL DEFAULT ''"},
+	{"kv", "expires", "TEXT NOT NULL DEFAULT ''"},
+	{"kv", "body", "TEXT NOT NULL DEFAULT ''"},
 	{"kv", "project", "TEXT NOT NULL DEFAULT ''"},
 	{"kv_link", "project", "TEXT NOT NULL DEFAULT ''"},
 	{"exchanges", "archived", "INTEGER NOT NULL DEFAULT 0"},

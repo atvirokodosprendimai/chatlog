@@ -55,6 +55,8 @@ type Request struct {
 	Query   string `json:"query"`
 	Limit   int    `json:"limit,omitempty"`
 	Since   string `json:"since,omitempty"` // YYYY-MM-DD or RFC3339
+	Until   string `json:"until,omitempty"` // same forms as since; exclusive, so since and until tile
+	Role    string `json:"role,omitempty"`  // user (the user's words), assistant (the answer) or any, the default
 	Repo    string `json:"repo,omitempty"`
 	Mode    string `json:"mode,omitempty"` // eval's handle on the variants
 	Form    string `json:"form,omitempty"`
@@ -84,6 +86,9 @@ type Response struct {
 	Mode     string   `json:"mode"`
 	Degraded []string `json:"degraded,omitempty"`
 	TookMs   int64    `json:"took_ms"`
+	// Role and Until echo what this server applied: a client of an older server, which ignores both, can tell.
+	Role  string `json:"role,omitempty"`
+	Until string `json:"until,omitempty"`
 }
 
 // Service holds the stores.
@@ -101,8 +106,8 @@ type KVHit struct {
 }
 
 // KVSearch returns the notes nearest the query, each key at its last value; prefix narrows to a subtree. It sees the notes
-// of project and the global ones ("*": every project's).
-func (s *Service) KVSearch(ctx context.Context, project, q, prefix string, limit int) ([]KVHit, error) {
+// of project and the global ones ("*": every project's). withDeleted also finds deleted notes, at the value they had.
+func (s *Service) KVSearch(ctx context.Context, project, q, prefix string, limit int, withDeleted bool) ([]KVHit, error) {
 	if strings.TrimSpace(q) == "" {
 		return nil, errors.New("empty query")
 	}
@@ -127,7 +132,7 @@ func (s *Service) KVSearch(ctx context.Context, project, q, prefix string, limit
 	for i, h := range hits {
 		rids[i] = h.ID
 	}
-	live, err := s.Store.KVLatest(ctx, project, rids, prefix)
+	live, err := s.Store.KVLatestWith(ctx, project, rids, prefix, withDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +230,11 @@ func ParseSince(s string) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t, nil
 	}
-	return time.ParseInLocation("2006-01-02", s, time.Local)
+	t, err := time.ParseInLocation("2006-01-02", s, time.Local)
+	if err != nil {
+		return t, fmt.Errorf("%q is not YYYY-MM-DD (the start of that day, in the server's time zone) or RFC3339", s)
+	}
+	return t, nil
 }
 
 // Search runs one request.
@@ -237,6 +246,20 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 	since, err := ParseSince(r.Since)
 	if err != nil {
 		return Response{}, fmt.Errorf("since: %w", err)
+	}
+	until, err := ParseSince(r.Until)
+	if err != nil {
+		return Response{}, fmt.Errorf("until: %w", err)
+	}
+	if !since.IsZero() && !until.IsZero() && !since.Before(until) {
+		return Response{}, fmt.Errorf("since %s is not earlier than until %s: since is the first moment taken, until the first left out", r.Since, r.Until)
+	}
+	role, err := store.ParseRole(r.Role)
+	if err != nil {
+		return Response{}, fmt.Errorf("role: %w", err)
+	}
+	if role != "" && len(store.Terms(r.Query)) == 0 {
+		return Response{}, fmt.Errorf("role %s needs words in the query: a role matches by the words said in that role's text, not by meaning alone", role)
 	}
 	limit := r.Limit
 	if limit <= 0 {
@@ -252,7 +275,7 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 	if !store.ValidOrigin(r.Origin) {
 		return Response{}, fmt.Errorf("origin %q: main, subagent or all", r.Origin)
 	}
-	f := store.Filter{Since: since, Repo: r.Repo, Origin: r.Origin, Archive: r.Archive}
+	f := store.Filter{Since: since, Until: until, Repo: r.Repo, Role: role, Origin: r.Origin, Archive: r.Archive}
 	if r.Repo != "" { // an alias, a short sha or a key names the project; any other word is part of a path
 		key, names, found, err := s.Store.FindProject(ctx, r.Repo)
 		if err != nil {
@@ -262,7 +285,10 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 			f.Key, f.Names = key, names
 		}
 	}
-	resp := Response{Mode: mode}
+	resp := Response{Mode: mode, Role: role}
+	if !until.IsZero() {
+		resp.Until = until.UTC().Format(time.RFC3339)
+	}
 
 	var vecList, ftsList []int64
 	if mode != ModeFTS {
@@ -333,13 +359,16 @@ func (s *Service) vectorList(ctx context.Context, q string, f store.Filter) ([]i
 	if err != nil {
 		return nil, err
 	}
-	out := make([]int64, 0, pool)
+	kept := make([]int64, 0, len(ids))
 	for _, id := range ids {
-		if _, ok := rows[id]; ok && len(out) < pool {
-			out = append(out, id)
+		if _, ok := rows[id]; ok {
+			kept = append(kept, id)
 		}
 	}
-	return out, nil
+	if kept, err = s.Store.RoleMatch(ctx, kept, q, f.Role); err != nil {
+		return nil, err
+	}
+	return kept[:min(len(kept), pool)], nil
 }
 
 func (s *Service) rerank(ctx context.Context, r Request, form string, ids []int64, rows map[int64]store.Row, scores map[int64]float64) error {

@@ -26,11 +26,16 @@ const (
 	kvObjectMax  = 256
 )
 
-// kvLivePrefixes hold state that goes old; other keys (rule/, fact/, known/) are true until changed.
-var kvLivePrefixes = []string{"now/", "waits/"}
+// kvLivePrefixes hold state and work that goes old (M 2026-11-09: tasks and todo may be stale, the knowledge base never);
+// other keys (rule/, fact/, known/, tool/, lib/) are true until changed, and are stale only if they carry an expires.
+var kvLivePrefixes = []string{"now/", "waits/", "task/", "todo/", "promise/"}
+
+// kvRecordPrefixes are under a live prefix but say what was done, so they do not go old.
+var kvRecordPrefixes = []string{"task/done/"}
 
 func kvLive(key string) bool {
-	return slices.ContainsFunc(kvLivePrefixes, func(p string) bool { return strings.HasPrefix(key, p) })
+	return slices.ContainsFunc(kvLivePrefixes, func(p string) bool { return strings.HasPrefix(key, p) }) &&
+		!slices.ContainsFunc(kvRecordPrefixes, func(p string) bool { return strings.HasPrefix(key, p) })
 }
 
 // kvAge is a duration in one short unit: seconds under a minute, minutes under an hour, hours under two days, then days.

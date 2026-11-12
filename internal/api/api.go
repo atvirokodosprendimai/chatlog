@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -48,6 +49,14 @@ type KVReadRequest struct {
 	LinkedTo string   `json:"linked_to,omitempty"`
 	Follow   int      `json:"follow,omitempty"`
 	Stale    int      `json:"stale,omitempty"` // 1 returns only the keys that are stale
+	// WithDeleted also returns the deleted keys, each with its last value and deleted_at.
+	WithDeleted bool `json:"with_deleted,omitempty"`
+	// Full also returns each note's body, the long text kept with its head; without it a note has has_body and no body.
+	Full bool `json:"full,omitempty"`
+	// KeysOnly returns each key without its value: key, time, age, bytes, stale.
+	KeysOnly bool `json:"keys_only,omitempty"`
+	// ChangedSince keeps only the keys whose last row, a write or a delete, is at or after it: RFC3339 or a span back from now.
+	ChangedSince string `json:"changed_since,omitempty"`
 }
 
 // KVWriteRequest sets and deletes keys in one transaction.
@@ -56,6 +65,14 @@ type KVWriteRequest struct {
 	Cwd     string            `json:"cwd,omitempty"` // the caller\'s directory, read as the CLI reads it when Project is empty
 	Set     map[string]string `json:"set,omitempty"`
 	Del     []string          `json:"del,omitempty"`
+	// Expires names, for some keys of Set, when the note goes old: a span from now (12h, 7d) or an RFC3339 time.
+	Expires map[string]string `json:"expires,omitempty"`
+	// IfAbsent and IfValue are conditions checked in the same transaction, on each key in the scope it would be written
+	// to: the write is refused, whole, unless every IfAbsent key has no live value and every IfValue key holds exactly its value.
+	IfAbsent []string          `json:"if_absent,omitempty"`
+	IfValue  map[string]string `json:"if_value,omitempty"`
+	// Body is, for some keys of Set, a long text kept with the key's head (the Set value): at most store.KVBodyMax bytes.
+	Body map[string]string `json:"body,omitempty"`
 }
 
 // KVLinkRequest adds and deletes links in one transaction.
@@ -85,6 +102,8 @@ type KVSearchRequest struct {
 	Query   string `json:"query"`
 	Prefix  string `json:"prefix,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
+	// WithDeleted also finds deleted notes, at the value they had.
+	WithDeleted bool `json:"with_deleted,omitempty"`
 }
 
 // ArchiveRequest archives a row or, with archived false, restores it: that row only, and a why that says what was checked.
@@ -167,13 +186,28 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 		reply(w, kv, err)
 	})
 	mux.HandleFunc("POST /kv/write", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, kvWriteMax))
 		var req KVWriteRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err == nil {
+			err = json.Unmarshal(body, &req)
+		}
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		warn, err := svc.Store.KVWrite(r.Context(), requestProject(r.Context(), svc.Store, req.Project, req.Cwd), req.Set, req.Del)
-		reply(w, KVWriteResponse{Written: len(req.Set) + len(req.Del), Warnings: warn}, err)
+		// A field this server does not know was ignored before; the two-release rule: warn now, refuse later. Anything
+		// that could be a guard is the exception: a guard is new, and dropping one turns a claim into a plain write.
+		var warn []string
+		for _, f := range unknownFields(body, req) {
+			if looksLikeGuard(f) {
+				http.Error(w, fmt.Sprintf("unknown condition %q: nothing written (if_absent, if_value)", f), http.StatusBadRequest)
+				return
+			}
+			warn = append(warn, fmt.Sprintf("field %q is not known to this server and was ignored; a later release refuses it", f))
+		}
+		w2, err := svc.Store.KVWritePlan(r.Context(), store.KVPlan{Project: requestProject(r.Context(), svc.Store, req.Project, req.Cwd),
+			Set: req.Set, Del: req.Del, Expires: req.Expires, IfAbsent: req.IfAbsent, IfValue: req.IfValue, Body: req.Body})
+		reply(w, KVWriteResponse{Written: len(req.Set) + len(req.Del), Warnings: append(warn, w2...)}, err)
 	})
 	mux.HandleFunc("POST /kv/link", func(w http.ResponseWriter, r *http.Request) {
 		var req KVLinkRequest
@@ -190,7 +224,7 @@ func Handler(svc *search.Service, status func(context.Context) (Status, error)) 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		hits, err := svc.KVSearch(r.Context(), requestProject(r.Context(), svc.Store, req.Project, req.Cwd), req.Query, req.Prefix, req.Limit)
+		hits, err := svc.KVSearch(r.Context(), requestProject(r.Context(), svc.Store, req.Project, req.Cwd), req.Query, req.Prefix, req.Limit, req.WithDeleted)
 		reply(w, hits, err)
 	})
 	mux.HandleFunc("POST /archive", func(w http.ResponseWriter, r *http.Request) {
@@ -234,9 +268,50 @@ func requestProject(_ context.Context, st *store.Store, name, cwd string) string
 	return store.GlobalProject
 }
 
+// kvWriteMax bounds the body of one /kv/write: a value is at most 500 bytes and a body 8 KiB, so this is thousands of keys.
+const kvWriteMax = 4 << 20
+
+// looksLikeGuard says whether an unknown field of /kv/write could be a condition in another spelling (if-absent, IfValue, absent).
+func looksLikeGuard(f string) bool {
+	n := strings.ToLower(strings.NewReplacer("-", "", "_", "", " ", "").Replace(f))
+	return strings.HasPrefix(n, "if") || strings.Contains(n, "absent")
+}
+
+// unknownFields names the top-level JSON fields of body that v's struct has no tag for.
+func unknownFields(body []byte, v any) []string {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(body, &raw) != nil {
+		return nil
+	}
+	known := map[string]bool{}
+	t := reflect.TypeOf(v)
+	for i := 0; i < t.NumField(); i++ {
+		known[strings.ToLower(strings.Split(t.Field(i).Tag.Get("json"), ",")[0])] = true // encoding/json reads names without regard to case
+	}
+	var out []string
+	for f := range raw {
+		if !known[strings.ToLower(f)] {
+			out = append(out, f)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // kvRead is a read with its edges: the keys linked to LinkedTo join the named ones, and Follow 1 hangs each key's
 // edges on it. Without both it is the plain read.
 func kvRead(ctx context.Context, st *store.Store, req KVReadRequest, at time.Time) ([]store.KV, error) {
+	var since time.Time // a span counts back from `at` when the notes are read as they stood then, as age does, else from now
+	if req.ChangedSince != "" {
+		var err error
+		ref := at
+		if ref.IsZero() {
+			ref = time.Now()
+		}
+		if since, err = store.ParseWhen(req.ChangedSince, ref, false); err != nil {
+			return nil, fmt.Errorf("%w: changed_since: %s", store.ErrRefused, err)
+		}
+	}
 	if req.Follow != 0 && req.Follow != 1 {
 		return nil, fmt.Errorf("%w: follow is 0 or 1", store.ErrRefused)
 	}
@@ -254,9 +329,17 @@ func kvRead(ctx context.Context, st *store.Store, req KVReadRequest, at time.Tim
 		}
 		keys = append(slices.Clone(keys), subj...)
 	}
-	kv, err := st.KVRead(ctx, req.Project, keys, req.Prefixes, at)
+	kv, err := st.KVReadFull(ctx, req.Project, keys, req.Prefixes, at, req.WithDeleted, req.Full && !req.KeysOnly)
 	if req.Stale == 1 {
 		kv = slices.DeleteFunc(kv, func(e store.KV) bool { return !e.Stale })
+	}
+	if !since.IsZero() {
+		kv = slices.DeleteFunc(kv, func(e store.KV) bool { return e.Changed().Before(since) })
+	}
+	if req.KeysOnly {
+		for i := range kv {
+			kv[i].Bytes, kv[i].Value = len(kv[i].Value)+kv[i].BodyLen, ""
+		}
 	}
 	if err != nil || req.Follow == 0 {
 		return kv, err

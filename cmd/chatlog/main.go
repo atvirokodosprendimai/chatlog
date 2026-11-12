@@ -54,7 +54,7 @@ search, status and mcp only talk to that socket. The hooks write SQLite themselv
   chatlog hook EVENT                          what the hooks run (stdin: the event's JSON); always exits 0
   chatlog ingest --all | FILE...              read transcripts once, from where each was left
   chatlog server [--source DIR]... [--once]   ingest and serve (--once: ingest, embed, exit)
-  chatlog search QUERY [--since] [--repo] [--limit] [--json]
+  chatlog search QUERY [--since] [--until] [--role user|assistant|any] [--repo] [--limit] [--json]
   chatlog status | events | export | forget
   chatlog import-aam FILE [--team] [--wing]... [--project-of wing=project]...   read another memory's SQLite file into the history as archived rows
   chatlog mcp                                 stdio MCP: chat_search, chat_get, chat_tail, chat_status, kv_read, kv_write, kv_search, kv_link
@@ -85,10 +85,23 @@ Notes in detail (kv_*):
   value    ONE line, an instruction and where its payload lies; over 200 bytes kept with a warning,
            over 500 the whole write is refused
   history  a write never changes an old row: kv_read at=<RFC3339> shows the notes as they stood then
-  stale    keys under now/ and waits/ are marked stale after 12 h: read the source again before saying them
+  stale    a key past its expires_at, or without one under now/, waits/, task/, todo/, promise/ (not task/done/) older than 12 h, is marked stale: read the source
+           again before saying it. kv_read stale=1 prefixes [""] lists them all: rewrite or delete each
+  expires  kv_write expires {"<key>": "12h" | "7d" | RFC3339}, optional for any key
+  deleted  a delete is soft, the history stays: kv_read / kv_search with_deleted=1 find the note at its last value, with deleted_at
   edges    kv_link add [{s, p, o}]: p one of affects, blocked_by, fixed_by, decided_by, applies_to,
            supersedes, see_also; o a key or a pointer (<repo>@<sha>, chat:<id>, file:line, a URL)
   find     kv_read keys/prefixes when you know the key; kv_search query when you know only the subject
+  follow   kv_read follow=1 lists each key's edges, out {p, o} and in {s, p}; linked_to=<object> also reads every key linked to that object
+           ("what applies_to repo/webshop"; a key or a pointer), with follow=1 to see how
+  claim    kv_write if_absent ["<key>"] / if_value {"<key>": "<expected>"}: refused whole unless the key has no live value / holds that value;
+           the refusal names each key with its value, time and project. Put a token in a claimed value: a retry is refused by its own row
+  long     kv_write body {"<key>": "<text>"}, a long text (the limit is in the kv_write description), with its head in set (required);
+           kv_read shows has_body, the text only with full=1; kv_search finds the head, never the body
+  look     kv_read keys_only=1 (no values: key, time, age, bytes, stale, has_body); changed_since=1h|7d|RFC3339 (written or deleted since;
+           with with_deleted=1 the deleted show); both with prefixes and stale=1
+  search   chat_search until (exclusive: since and until tile; a date is the start of that day in the server's time zone), role user|assistant|any:
+           the query must say a word in the user's words / in the answer, by words, not by meaning alone
 
 Knowledge in kv (the hooks apply these notes; a new rule is a kv_write, never a code change):
   hook/prompt/<n>          one line, printed with every prompt: "use the file tool for every file read"
@@ -386,7 +399,7 @@ func searchCmd() *cli.Command {
 		Usage:     "the same query as chat_search",
 		ArgsUsage: "QUERY",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "since"}, &cli.StringFlag{Name: "repo"},
+			&cli.StringFlag{Name: "since"}, &cli.StringFlag{Name: "until"}, &cli.StringFlag{Name: "role", Usage: "user, assistant or any"}, &cli.StringFlag{Name: "repo"},
 			&cli.StringFlag{Name: "origin", Usage: "default the user's own session; subagent or all"},
 			&cli.BoolFlag{Name: "archive", Usage: "also search the archive: rows kept but hidden by default, old and maybe no longer true"},
 			&cli.IntFlag{Name: "limit", Value: 10}, &cli.BoolFlag{Name: "json"},
@@ -395,7 +408,7 @@ func searchCmd() *cli.Command {
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			q := strings.Join(cmd.Args().Slice(), " ")
 			resp, err := api.NewClient(socketPath(cmd)).Search(ctx, search.Request{Query: q, Limit: cmd.Int("limit"),
-				Since: cmd.String("since"), Repo: cmd.String("repo"), Mode: cmd.String("mode"), Form: cmd.String("form"), Origin: cmd.String("origin"), Archive: cmd.Bool("archive")})
+				Since: cmd.String("since"), Until: cmd.String("until"), Role: cmd.String("role"), Repo: cmd.String("repo"), Mode: cmd.String("mode"), Form: cmd.String("form"), Origin: cmd.String("origin"), Archive: cmd.Bool("archive")})
 			if err != nil {
 				return err
 			}

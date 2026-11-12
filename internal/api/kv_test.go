@@ -176,5 +176,180 @@ func TestKVReadStaleOneReturnsOnlyTheStaleKeys(t *testing.T) {
 	}
 	if code, _ = post(t, srv, "/kv/read", `{"project":"p","prefixes":[""],"stale":2}`); code != 400 {
 		t.Fatalf("stale 2: %d", code)
+
+	}
+}
+func TestKVReadStaleListsOnlyTheNotesPastTheirExpiryAndSoftDeleteIsFound(t *testing.T) {
+	srv, _ := server(t)
+	if code, body := post(t, srv, "/kv/write", `{"set":{"fact/a":"v","fact/b":"v"},"expires":{"fact/a":"1h"}}`); code != 200 {
+		t.Fatalf("write: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "/kv/write", `{"set":{"fact/c":"v"},"expires":{"fact/zz":"1h"}}`); code != 400 {
+		t.Fatalf("an expiry for a key not in set: %d %s", code, body)
+	}
+	at := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	code, body := post(t, srv, "/kv/read", `{"prefixes":[""],"stale":1,"at":"`+at+`"}`)
+	if code != 200 || !strings.Contains(body, `"fact/a"`) || strings.Contains(body, `"fact/b"`) || !strings.Contains(body, `"expires_at"`) {
+		t.Fatalf("stale read: %d %s: want fact/a only", code, body)
+	}
+	post(t, srv, "/kv/write", `{"del":["fact/a"]}`)
+	if _, body := post(t, srv, "/kv/read", `{"prefixes":["fact/"]}`); strings.Contains(body, `"fact/a"`) {
+		t.Fatalf("a deleted note shows in a plain read: %s", body)
+	}
+	if _, body := post(t, srv, "/kv/read", `{"prefixes":["fact/"],"with_deleted":true}`); !strings.Contains(body, `"fact/a"`) || !strings.Contains(body, `"deleted_at"`) {
+		t.Fatalf("with_deleted: %s", body)
+	}
+}
+
+func TestKVWriteConditionsOverTheSocket(t *testing.T) {
+	srv, _ := server(t)
+	if code, body := post(t, srv, "/kv/write", `{"set":{"task/adr/3":"mine"},"if_absent":["task/adr/3"],"project":"alpha"}`); code != 200 {
+		t.Fatalf("first claim: %d %s", code, body)
+	}
+	code, body := post(t, srv, "/kv/write", `{"set":{"task/adr/3":"yours"},"if_absent":["task/adr/3"],"project":"alpha"}`)
+	if code != 400 || !strings.Contains(body, "mine") || !strings.Contains(body, "alpha") {
+		t.Fatalf("second claim: %d %s: want a refusal naming the value and the writer", code, body)
+	}
+	if code, body := post(t, srv, "/kv/write", `{"set":{"task/adr/3":"next"},"if_value":{"task/adr/3":"mine"},"project":"alpha"}`); code != 200 {
+		t.Fatalf("swap: %d %s", code, body)
+	}
+	if code, _ := post(t, srv, "/kv/write", `{"set":{"task/adr/3":"x"},"if_value":{"task/adr/3":"mine"},"project":"alpha"}`); code != 400 {
+		t.Fatalf("a stale swap: %d", code)
+	}
+	if _, body := post(t, srv, "/kv/read", `{"keys":["task/adr/3"],"project":"alpha"}`); !strings.Contains(body, `"next"`) {
+		t.Fatalf("%s", body)
+	}
+}
+
+func TestKVReadKeysOnlyHasNoValueAndChangedSinceFiltersOnTheLastRow(t *testing.T) {
+	srv, _ := server(t)
+	post(t, srv, "/kv/write", `{"set":{"fact/a":"first value","fact/b":"second","now/c":"third"}}`)
+	time.Sleep(20 * time.Millisecond)
+	mid := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(20 * time.Millisecond)
+	post(t, srv, "/kv/write", `{"set":{"fact/b":"second, again"},"del":["fact/a"]}`)
+
+	_, body := post(t, srv, "/kv/read", `{"prefixes":["fact/"],"keys_only":true}`)
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil || len(got) != 1 {
+		t.Fatalf("%s %v", body, err)
+	}
+	if _, has := got[0]["value"]; has || got[0]["key"] != "fact/b" || got[0]["bytes"] != float64(len("second, again")) || got[0]["age"] == nil {
+		t.Fatalf("keys_only: key, age, bytes and no value: %s", body)
+	}
+	_, body = post(t, srv, "/kv/read", `{"prefixes":[""],"changed_since":"`+mid+`"}`)
+	if strings.Contains(body, "now/c") || strings.Contains(body, "fact/a") || !strings.Contains(body, "fact/b") {
+		t.Fatalf("only the key written since (a deleted key only with with_deleted): %s", body)
+	}
+	_, body = post(t, srv, "/kv/read", `{"prefixes":[""],"changed_since":"`+mid+`","with_deleted":true,"keys_only":true}`)
+	if !strings.Contains(body, "fact/a") || !strings.Contains(body, "deleted_at") || strings.Contains(body, "now/c") {
+		t.Fatalf("a delete since counts: %s", body)
+	}
+	_, body = post(t, srv, "/kv/read", `{"prefixes":[""],"changed_since":"1h"}`)
+	if !strings.Contains(body, "now/c") || !strings.Contains(body, "fact/b") {
+		t.Fatalf("a span counts back from now: %s", body)
+	}
+	if _, body = post(t, srv, "/kv/read", `{"prefixes":[""],"changed_since":"`+time.Now().Add(time.Hour).UTC().Format(time.RFC3339)+`"}`); strings.TrimSpace(body) != "[]" {
+		t.Fatalf("the future is an empty list: %s", body)
+	}
+	if code, _ := post(t, srv, "/kv/read", `{"prefixes":[""],"changed_since":"yesterday"}`); code != 400 {
+		t.Fatalf("not a time and not a span: %d", code)
+	}
+}
+
+func TestKVReadKeysOnlyCombinesWithStale(t *testing.T) {
+	srv, _ := server(t)
+	post(t, srv, "/kv/write", `{"set":{"fact/a":"v","fact/b":"v"},"expires":{"fact/a":"1h"}}`)
+	at := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	_, body := post(t, srv, "/kv/read", `{"prefixes":[""],"stale":1,"keys_only":true,"at":"`+at+`"}`)
+	if !strings.Contains(body, "fact/a") || strings.Contains(body, "fact/b") || strings.Contains(body, `"value"`) || !strings.Contains(body, `"stale":true`) {
+		t.Fatalf("%s", body)
+	}
+}
+
+func TestKVWriteRefusesAMisspeltGuardAndWarnsOfOtherUnknownFields(t *testing.T) {
+	srv, _ := server(t)
+	if code, body := post(t, srv, "/kv/write", `{"set":{"a":"v"},"if_abent":["a"]}`); code != 400 || !strings.Contains(body, "if_abent") {
+		t.Fatalf("a misspelt or newer condition must not become an unconditional write: %d %s", code, body)
+	}
+	if _, body := post(t, srv, "/kv/read", `{"keys":["a"]}`); strings.TrimSpace(body) != "[]" {
+		t.Fatalf("nothing written: %s", body)
+	}
+	// two-release rule: a field that was ignored before is still accepted, with a warning, and refused in a later release
+	code, body := post(t, srv, "/kv/write", `{"set":{"a":"v"},"bogus":1}`)
+	if code != 200 || !strings.Contains(body, "bogus") || !strings.Contains(body, `"written":1`) {
+		t.Fatalf("an unknown field: written, with a warning that names it: %d %s", code, body)
+	}
+}
+
+func TestKVReadChangedSinceCountsSpansFromAtAndMeansTheLastRow(t *testing.T) {
+	srv, _ := server(t)
+	if code, body := post(t, srv, "/kv/write", `{"set":{"fact/a":"v"}}`); code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	at := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
+	if _, body := post(t, srv, "/kv/read", `{"prefixes":[""],"at":"`+at+`","changed_since":"1h"}`); strings.TrimSpace(body) != "[]" {
+		t.Fatalf("read as of at (3 h later), 1h back from at does not reach the write: %s", body)
+	}
+	if _, body := post(t, srv, "/kv/read", `{"prefixes":[""],"at":"`+at+`","changed_since":"4h"}`); !strings.Contains(body, "fact/a") {
+		t.Fatalf("4h back from at does: %s", body)
+	}
+	time.Sleep(20 * time.Millisecond)
+	mid := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(20 * time.Millisecond)
+	post(t, srv, "/kv/write", `{"del":["fact/a"]}`)
+	post(t, srv, "/kv/write", `{"set":{"fact/a":"again"}}`)
+	if _, body := post(t, srv, "/kv/read", `{"prefixes":[""],"changed_since":"`+mid+`"}`); !strings.Contains(body, `"again"`) {
+		t.Fatalf("deleted and written again since: the last row is a live write: %s", body)
+	}
+}
+
+func TestKVBodyOverTheSocket(t *testing.T) {
+	srv, _ := server(t)
+	if code, body := post(t, srv, "/kv/write", `{"set":{"lib/n":"head"},"body":{"lib/n":"first\nsecond"}}`); code != 200 {
+		t.Fatalf("write: %d %s", code, body)
+	}
+	if code, _ := post(t, srv, "/kv/write", `{"set":{"lib/m":"head"},"body":{"lib/zz":"x"}}`); code != 400 {
+		t.Fatalf("a body for a key not in set: %d", code)
+	}
+	_, body := post(t, srv, "/kv/read", `{"keys":["lib/n"]}`)
+	if !strings.Contains(body, `"has_body":true`) || strings.Contains(body, "first") {
+		t.Fatalf("without full: %s", body)
+	}
+	_, body = post(t, srv, "/kv/read", `{"keys":["lib/n"],"full":true}`)
+	if !strings.Contains(body, `"body":"first\nsecond"`) {
+		t.Fatalf("with full: %s", body)
+	}
+	_, body = post(t, srv, "/kv/read", `{"keys":["lib/n"],"keys_only":true,"full":true}`)
+	if strings.Contains(body, "first") || strings.Contains(body, `"value"`) || !strings.Contains(body, `"bytes":16`) { // "head" 4 + "first\nsecond" 12
+		t.Fatalf("keys_only counts head + body and shows neither: %s", body)
+	}
+}
+
+func TestKVWriteTreatsEveryWayOfSpellingAGuardAsAGuard(t *testing.T) {
+	srv, _ := server(t)
+	post(t, srv, "/kv/write", `{"set":{"k":"first"}}`)
+	for _, field := range []string{"if-absent", "ifabsent", "IfAbsent", "if_absent_", "absent", "if_value_x"} {
+		if code, body := post(t, srv, "/kv/write", `{"set":{"k":"second"},"`+field+`":["k"]}`); code != 400 {
+			t.Errorf("%q: %d %s: a guard in another spelling must refuse, not write without it", field, code, body)
+		}
+	}
+	// the decoder reads names without regard to case, so IF_ABSENT is the guard and is applied
+	if code, _ := post(t, srv, "/kv/write", `{"set":{"k":"second"},"IF_ABSENT":["k"]}`); code != 400 {
+		t.Errorf("IF_ABSENT applies as if_absent: %d", code)
+	}
+	if _, body := post(t, srv, "/kv/read", `{"keys":["k"]}`); !strings.Contains(body, `"first"`) {
+		t.Fatalf("nothing overwrote it: %s", body)
+	}
+	if code, body := post(t, srv, "/kv/write", `{"set":{"k":"third"},"IF_ABSENT_NOT":1}`); code != 200 || !strings.Contains(body, "IF_ABSENT_NOT") {
+		t.Logf("a field that only looks a bit like a guard is judged by name: %d %s", code, body)
+	}
+}
+
+func TestKVWriteRefusesABodyOfAbsurdSize(t *testing.T) {
+	srv, _ := server(t)
+	huge := `{"set":{"k":"v"},"pad":"` + strings.Repeat("x", 5<<20) + `"}`
+	if code, _ := post(t, srv, "/kv/write", huge); code != 400 && code != 413 {
+		t.Fatalf("5 MiB: %d", code)
 	}
 }
