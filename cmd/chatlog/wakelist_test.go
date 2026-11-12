@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -284,5 +285,27 @@ func TestAGlobalDoneEndsTheWakeThroughTheCLIToo(t *testing.T) {
 	}
 	if out, _ := h.chatlog(d, "", "wake"); strings.Contains(out, "kv_write sit/醒/done") && !strings.Contains(out, "sit/<g>/done") {
 		t.Fatalf("the wake is done, the outline still names it owed:\n%s", out)
+	}
+}
+
+// CI (macOS): the hook is given a cwd that goes through a link, the CLI runs in the directory itself: one project
+func TestTheHookAndTheCLIAgreeOnADirectoryReachedThroughALink(t *testing.T) {
+	h, d := wakeHome(t)
+	real := h.path("real")
+	os.MkdirAll(real, 0o700)
+	link := h.path("lnk")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	h.chatlog(d, "", "wake", "load", h.path("list.txt"))
+	hookIn := fmt.Sprintf(`{"session_id":"s1","cwd":%q,"source":"compact"}`, link)
+	if out, err := h.chatlog(d, hookIn, "hook", "SessionStart"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	c := exec.Command(built, append(append([]string{}, d...), "wake")...)
+	c.Env, c.Dir = h.env, real
+	out, err := c.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), `kv_write sit/醒/done = "<that LOADED line>"`) {
+		t.Fatalf("the CLI in the real dir does not see what the hook armed through the link: %v\n%s", err, out)
 	}
 }
