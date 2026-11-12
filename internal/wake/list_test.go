@@ -207,3 +207,22 @@ func TestDumpWritesPagesReplacesOnlyItsOwnAndRefusesALink(t *testing.T) {
 		t.Error("a dump dir that is a file is refused")
 	}
 }
+
+func TestListFileLinesAndTheKeysTheyBecome(t *testing.T) {
+	l, notes, err := ParseListFile(strings.NewReader("# c\n\nfile ~/a.md\nfile  $PWD/CLAUDE.md \nprefix rule/\nstep call skill x y\nnote sit/醒 wake | load\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(l.Files, "|") != "~/a.md|$PWD/CLAUDE.md" || l.Prefixes[0] != "rule/" || l.Steps[0] != "call skill x y" || len(notes) != 1 || notes[0].Key != "sit/醒" || notes[0].Value != "wake | load" {
+		t.Fatalf("%+v %+v", l, notes)
+	}
+	k := l.Keys()
+	if k["global/wake/file/01"] != "~/a.md" || k["global/wake/file/02"] != "$PWD/CLAUDE.md" || k["global/wake/prefix/01"] != "rule/" || k["global/wake/step/01"] != "call skill x y" || len(k) != 4 {
+		t.Fatalf("%v", k)
+	}
+	for in, want := range map[string]string{"step ok\nfile\n": "line 2", "nope x\n": "line 1", "note onlykey\n": "line 1", "prefix \n": "line 1"} {
+		if _, _, err := ParseListFile(strings.NewReader(in)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", in, err, want)
+		}
+	}
+}

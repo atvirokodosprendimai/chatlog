@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"slices"
 	"strings"
 	"time"
 
@@ -45,13 +44,8 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 	}
 	printed := map[string]bool{} // the owed situations the reminder prints whole
 	if h.On(config.PiecePrompt) {
-		owed := know.Owed(kvs)
-		if len(owed) > 0 {
-			// a done written to the global notes counts too, and a project's own done hides it from the merged read
-			global, err := d.Store.KVRead(ctx, store.GlobalProject, nil, []string{store.GlobalPrefix + know.SitPrefix}, time.Time{})
-			errs = append(errs, err)
-			owed = know.Owed(append(slices.Clone(kvs), global...))
-		}
+		owed, err := wake.OwedWith(ctx, d.Store, kvs) // a global done counts too: the merged read hides it behind a project's older one
+		errs = append(errs, err)
 		if len(owed) > 0 {
 			parts = append(parts, wake.Reminders(owed, wake.DumpDir(d.project(in))))
 			for _, a := range owed[:min(len(owed), wake.MaxReminders)] {

@@ -210,13 +210,21 @@ func (r Report) Outline(groups ...string) string {
 		}
 	}
 	fmt.Fprintf(&b, "== ANSWER with (the counts you really read, if they differ): %s\n", r.Loaded())
+	b.WriteString(Finish(groups...))
+	b.WriteString("== FASTER: chatlog wake --dump DIR writes all of the above into pages of at most 24000 bytes: read every page in ONE turn, in parallel\n")
+	return b.String()
+}
+
+// Finish is the line that ends a wake: the key to write with the LOADED line, for each owed situation (a generic one when
+// the reader did not find any owed for this project).
+func Finish(groups ...string) string {
 	if len(groups) == 0 {
-		b.WriteString("== THEN: kv_write sit/<g>/done = \"<that LOADED line>\" for the situation the reminder names; that ends the reminder\n")
+		return "== THEN: kv_write sit/<g>/done = \"<that LOADED line>\" for the situation the reminder names; that ends the reminder\n"
 	}
+	var b strings.Builder
 	for _, g := range groups {
 		fmt.Fprintf(&b, "== THEN: kv_write %s = \"<that LOADED line>\"; that ends the reminder\n", know.DoneKey(g))
 	}
-	b.WriteString("== FASTER: chatlog wake --dump DIR writes all of the above into pages of at most 24000 bytes: read every page in ONE turn, in parallel\n")
 	return b.String()
 }
 
