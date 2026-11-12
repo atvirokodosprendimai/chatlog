@@ -44,12 +44,27 @@ searchable, versioned) are the only place a new machine needs.
    are not compared (a clock stepped back between the two writes keeps the reminder until it catches up). A `done` in
    the project's notes and one under `global/` both count, the later of the two.
 6. `chatlog wake` with a wake list prints the list; without one it prints the digest as before; `--digest`, `--kind`
-   and `--bytes` ask for the digest (nothing that worked is refused).
-7. A page is at most 24000 bytes and the pages joined are the content; a dump dir is made 0700, is never a link, and
-   must be ours, else the dump is refused; only `page-*.txt` in it are replaced.
-8. A listed file is read when it is a regular file, at most 2 MiB; a longer one is cut with a note, a device or a
-   directory is printed NOT A FILE. A path expands only `~`, `$HOME`, `$PWD`; an unknown `$NAME` is not expanded and so
-   the file is MISSING.
+   and `--bytes` ask for the digest (nothing that worked is refused). `--dump` with any of them, or with no DIR, or with
+   no list, is an error that says so: it never silently prints the other thing.
+7. A page is at most 24000 bytes and the pages joined are the content; the page numbers have as many digits as the count
+   needs (two at least), so the names sort as the pages read. A dump dir is made 0700 when it is not there; one that is
+   must be a real directory of this user, closed to others, never a link, else the dump is refused. Dumps into one dir are
+   serialised by a lock in it; a page is written under a temporary name and renamed into place, then the pages of an
+   earlier dump that the new one does not replace are removed (only `page-N.txt`; other files stay). The reminder's dir is
+   per user and per project: `<tmp>/chatlog-wake-<uid>-<hash of the project>`. `chatlog wake --dump` lists the pages: read
+   those.
+8. The list is notes, and notes can be written by an agent that took a prompt injection, so the load is bounded and
+   narrow. A listed file is read only when, with its links resolved, it is under the home or the working directory and
+   not a secret by name (a `.ssh`, `.gnupg`, `.aws`, `.kube` or `.docker` segment, `.netrc`, a dotenv name); otherwise
+   it is printed REFUSED with the reason. It must be a regular file, opened without blocking and without following a
+   link, judged on the open descriptor (a FIFO or a device is NOT A FILE); at most 2 MiB each and 8 MiB together (a longer
+   file is cut at a line end and says CUT, the file after the budget says OVER BUDGET); a read that fails is a READ ERROR,
+   not a short file. A file listed twice, by whatever name, is read once. A path expands only `~`, `$HOME`, `$PWD` (whole
+   names; `$HOMEDIR` is not `$HOME`); another `$NAME` is not expanded and so the file is MISSING. The LOADED line counts
+   files read, lines, notes per prefix, files cut, and names the skipped ones.
+9. `chatlog wake load FILE` replaces the list in one transaction; a file with no `file`, `prefix` or `step` line is
+   refused unless `--clear`; the keys it deletes are deleted on the condition that they still hold what the load read, so a
+   key written meanwhile refuses the whole write; `note` lines may write only `sit/` and `global/sit/` keys.
 
 ## A new machine
 
@@ -64,3 +79,8 @@ paths first). Nothing else lives outside the notes.
 - The arm is one kv write in the hook's 1 s lock wait; it is not spooled as event rows are. A lock held longer loses the
   arm for that event, and the hook logs it in `hooks.log`. The next SessionStart arms again.
 - A group name is a path segment of at most about 115 bytes; a longer one is refused by the notes' own key limit.
+- The text of a listed file or note is printed as it is: it is the user's own and the session is told to read it, so it
+  may be read as instructions. The path rule above keeps a hostile repository's link out of the home; it does not make
+  a file in the project trustworthy. A listed `$PWD/CLAUDE.md` is the same file Claude Code reads on its own.
+- The prefixes are read whole with their bodies and the number of list entries is not capped; the budget bounds the files
+  only. A page set in the temp dir stays there until the next dump (mode 0600 in a 0700 dir of the user).

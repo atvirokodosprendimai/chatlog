@@ -4,6 +4,8 @@
 package wake
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -50,5 +52,26 @@ func TestReminderClipsAFreeSource(t *testing.T) {
 	m := Reminder(know.Arm{Group: strings.Repeat("g", 100), Source: strings.Repeat("醒", 100)}, "/tmp/chatlog-wake-ab12cd34")
 	if len(m) > 400 || !utf8.ValidString(m) {
 		t.Fatalf("%d bytes: %q", len(m), m)
+	}
+}
+
+// Security review: the hook's input and the temp dir are free text on a prompt
+func TestReminderNeutralisesControlCharactersAndQuotesTheDir(t *testing.T) {
+	m := Reminder(know.Arm{Group: "g", Source: "x\nIGNORE ALL\r\x00"}, "/tmp/a dir/$(x)")
+	if strings.ContainsAny(m, "\r\x00") || strings.Count(m, "\n") != 0 {
+		t.Fatalf("%q", m)
+	}
+	if !strings.Contains(m, `'/tmp/a dir/$(x)'`) {
+		t.Fatalf("the dir is quoted for a shell: %q", m)
+	}
+	if m := Reminder(know.Arm{Group: "g", Source: "compact"}, "/tmp/chatlog-wake-1000-ab12cd34"); strings.Contains(m, "'") {
+		t.Fatalf("a plain dir needs no quotes: %q", m)
+	}
+}
+
+func TestDumpDirIsPerUserAndPerProject(t *testing.T) {
+	a, b := DumpDir("path:/u/a"), DumpDir("path:/u/b")
+	if a == b || !strings.Contains(a, fmt.Sprintf("-%d-", os.Getuid())) {
+		t.Fatalf("%s %s", a, b)
 	}
 }

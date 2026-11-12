@@ -80,3 +80,12 @@ func TestOwedTakesTheLaterOfTwoDoneRows(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// Review (rv-correctness): armed in the project and in global is one owed situation, from the later row
+func TestOwedNamesAGroupOnceWhenArmedInBothScopes(t *testing.T) {
+	t0 := time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
+	got := Owed([]store.KV{armKV("a", "clear", t0), {Key: ArmedKey("a"), Value: ArmValue("compact", t0.Add(time.Minute)), Time: t0.Add(time.Minute), Project: "global"}})
+	if len(got) != 1 || got[0].Source != "compact" || !got[0].Since.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("%+v", got)
+	}
+}

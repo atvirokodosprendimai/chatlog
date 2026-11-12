@@ -91,7 +91,14 @@ func Owed(kvs []store.KV) []Arm {
 			continue
 		}
 		src, _, _ := strings.Cut(e.Value, " ")
-		out = append(out, Arm{Group: m[1], Source: src, Since: e.Time})
+		a := Arm{Group: m[1], Source: src, Since: e.Time}
+		if i := slices.IndexFunc(out, func(o Arm) bool { return o.Group == a.Group }); i >= 0 { // armed in two scopes: the later row
+			if a.Since.After(out[i].Since) {
+				out[i] = a
+			}
+			continue
+		}
+		out = append(out, a)
 	}
 	return out
 }

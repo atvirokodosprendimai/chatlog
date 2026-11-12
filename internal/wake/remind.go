@@ -19,14 +19,34 @@ import (
 const MaxReminders = 3
 
 // Reminder is the line an owed situation puts on a prompt: short, naming the command that loads and the key that finishes.
-// The procedure it states is the one `chatlog wake` prints (Report.Outline), so the two live in this package.
+// It says in a line what Report.Outline and Answer say in full (read every page, answer with the LOADED line, write the done key).
 func Reminder(a know.Arm, dir string) string {
-	src := a.Source // the hook's input, free text: clipped so the line keeps its size
-	if len(src) > 16 {
-		src = strings.ToValidUTF8(src[:16], "")
+	return fmt.Sprintf("WAKE NOT DONE (%s, since %s): run chatlog wake --dump %s, read EVERY page in ONE turn in parallel, then kv_write %s = its LOADED line, tell the user.",
+		plain(a.Source, 16), a.Since.UTC().Format(time.RFC3339), shellQuote(dir), know.DoneKey(a.Group))
+}
+
+// plain is free text cut to max bytes with anything but letters, digits and . _ - turned into ?: it is the hook's input,
+// and a newline in it would be a line of its own in the prompt.
+func plain(s string, max int) string {
+	if len(s) > max {
+		s = s[:max]
 	}
-	return fmt.Sprintf("WAKE NOT DONE (%s, since %s): run chatlog wake --dump %s, read EVERY page in ONE turn in parallel, then kv_write %s = its LOADED line and tell the user it. Repeats each prompt until done.",
-		src, a.Since.UTC().Format(time.RFC3339), dir, know.DoneKey(a.Group))
+	return strings.Map(func(r rune) rune {
+		if r == '.' || r == '_' || r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			return r
+		}
+		return '?'
+	}, s)
+}
+
+// shellQuote leaves a plain path alone and single-quotes any other.
+func shellQuote(s string) string {
+	for _, r := range s {
+		if !(r == '/' || r == '.' || r == '_' || r == '-' || r == '+' || r == '=' || r == ',' || r == '@' || r == ':' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+		}
+	}
+	return s
 }
 
 // Reminders is the lines for the owed situations, the first MaxReminders, then a count of the rest; "" when nothing is owed.
@@ -43,8 +63,9 @@ func Reminders(arms []know.Arm, dir string) string {
 }
 
 // DumpDir is where `chatlog wake --dump` puts a project's pages, and where the reminder tells the session to look: one per
-// project, not per session (two sessions of one project share it and write the same pages).
+// user and project, not per session (two sessions of one project share it and write the same pages, one at a time). The
+// user is in the name so that another user cannot hold the name in a shared temp dir.
 func DumpDir(project string) string {
 	sum := sha1.Sum([]byte(project))
-	return filepath.Join(os.TempDir(), "chatlog-wake-"+hex.EncodeToString(sum[:4]))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("chatlog-wake-%d-%s", os.Getuid(), hex.EncodeToString(sum[:4])))
 }

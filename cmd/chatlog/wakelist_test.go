@@ -49,7 +49,7 @@ func TestWakeLoadSeedsTheListAndWakePrintsIt(t *testing.T) {
 		t.Fatalf("wake: %v\n%s", err, out)
 	}
 	for _, w := range []string{"     3  " + h.path("docs/a.md"), "MISSING " + h.path("nowhere.md"), "total lines: 3", "rule/ (0 notes)", "  call the skill adr-write",
-		"LOADED files=1/2 lines=3/3 kv rule=0 known=0; skipped: " + h.path("nowhere.md")} {
+		"LOADED files=1/2 lines=3 kv rule=0 known=0; skipped: " + h.path("nowhere.md")} {
 		if !strings.Contains(out, w) {
 			t.Errorf("%q missing from\n%s", w, out)
 		}
@@ -79,7 +79,7 @@ func TestWakeLoadRefusesABadLineAndWritesNothing(t *testing.T) {
 	if out, err := h.chatlog(d, "", "wake", "load", h.path("bad.txt")); err == nil || !strings.Contains(out, "line 2") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if out, _ := h.chatlog(d, "", "wake"); strings.Contains(out, "fine") {
+	if out, _ := h.chatlog(d, "", "wake"); strings.Contains(out, "== STEPS") {
 		t.Fatalf("a refused file wrote:\n%s", out)
 	}
 	if out, err := h.chatlog(d, "step from stdin\n", "wake", "load", "-"); err != nil {
@@ -127,7 +127,7 @@ func TestWakeDumpWritesPagesAndSaysTheCounts(t *testing.T) {
 	if !strings.Contains(all.String(), "=== FILE "+h.path("docs/a.md")+" (3000 lines)") || !strings.Contains(all.String(), "=== MISSING "+h.path("nowhere.md")) {
 		t.Errorf("the content: %.300s", all.String())
 	}
-	for _, w := range []string{"LOADED files=1/2 lines=3000/3000", "ONE turn", "parallel"} {
+	for _, w := range []string{"LOADED files=1/2 lines=3000", "ONE turn", "parallel"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("%q missing from\n%s", w, out)
 		}
@@ -178,3 +178,111 @@ func TestTheWholeWakeThroughTheHooks(t *testing.T) {
 }
 
 var timeZero time.Time
+
+// Review (rv-delivery, rv-compat): a load of nothing must not wipe the list unasked
+func TestWakeLoadOfNothingIsRefusedUnlessClear(t *testing.T) {
+	h, d := wakeHome(t)
+	h.chatlog(d, "", "wake", "load", h.path("list.txt"))
+	h.write("empty.txt", "# only a comment\n")
+	if out, err := h.chatlog(d, "", "wake", "load", h.path("empty.txt")); err == nil || !strings.Contains(out, "--clear") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, _ := h.chatlog(d, "", "wake"); !strings.Contains(out, "a.md") {
+		t.Fatalf("the list was wiped by a refused load:\n%s", out)
+	}
+	if out, err := h.chatlog(d, "", "wake", "load", "--clear", h.path("empty.txt")); err != nil || !strings.Contains(out, "delete") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, _ := h.chatlog(d, "", "wake"); !strings.Contains(out, "CHATLOG WAKE") {
+		t.Fatalf("no list: the digest:\n%s", out)
+	}
+}
+
+// Review (rv-compat): flags that ask for the digest and a dump of the list at once are an error, not a silent choice
+func TestWakeDumpWithDigestFlagsIsRefused(t *testing.T) {
+	h, d := wakeHome(t)
+	h.chatlog(d, "", "wake", "load", h.path("list.txt"))
+	for _, extra := range []string{"--kind", "--bytes", "--digest"} {
+		args := []string{"wake", "--dump", h.path("p"), extra}
+		if extra != "--digest" {
+			args = append(args, "9000")
+			if extra == "--kind" {
+				args[len(args)-1] = "compact"
+			}
+		}
+		if out, err := h.chatlog(d, "", args...); err == nil || !strings.Contains(out, "--dump") {
+			t.Errorf("%v: %v\n%s", args, err, out)
+		}
+	}
+	if _, err := os.Stat(h.path("p")); err == nil {
+		t.Error("a refused dump wrote a dir")
+	}
+}
+
+// Review (rv-compat): a wake/ key in a project's own notes is not read, and the run says so
+func TestAProjectScopedWakeKeyIsSaidIgnored(t *testing.T) {
+	h, d := wakeHome(t)
+	h.chatlog(d, "", "wake", "load", h.path("list.txt"))
+	st, err := store.Open(h.path("d/chatlog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := project.Resolve(h.dir, st).Key
+	if _, err := st.KVWrite(context.Background(), key, map[string]string{"wake/file/09": "/etc/hostname"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	out, err := h.chatlog(d, "", "wake")
+	if err != nil || !strings.Contains(out, "wake/file/09") || !strings.Contains(out, "not read") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// Review (rv-delivery): the notes' warnings reach the operator
+func TestWakeLoadPrintsTheNotesWarnings(t *testing.T) {
+	h, d := wakeHome(t)
+	h.write("long.txt", "step "+strings.Repeat("long ", 60)+"\n")
+	if out, err := h.chatlog(d, "", "wake", "load", h.path("long.txt")); err != nil || !strings.Contains(out, "200") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+func TestWakeDumpWithNoDirIsAnError(t *testing.T) {
+	h, d := wakeHome(t)
+	h.chatlog(d, "", "wake", "load", h.path("list.txt"))
+	if out, err := h.chatlog(d, "", "wake", "--dump", ""); err == nil || !strings.Contains(out, "--dump") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// Review (rv-tests-design, rv-correctness)
+func TestWakeDumpWithoutAListIsRefusedAndLoadDryRunWritesNothing(t *testing.T) {
+	h, d := wakeHome(t)
+	if out, err := h.chatlog(d, "", "wake", "--dump", h.path("p")); err == nil || !strings.Contains(out, "no wake list") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, err := h.chatlog(d, "", "wake", "load", "--dry-run", h.path("list.txt")); err != nil || !strings.Contains(out, "would write global/wake/file/01") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, _ := h.chatlog(d, "", "wake"); !strings.Contains(out, "CHATLOG WAKE") {
+		t.Fatalf("a dry run wrote a list:\n%s", out)
+	}
+}
+
+func TestAGlobalDoneEndsTheWakeThroughTheCLIToo(t *testing.T) {
+	h, d := wakeHome(t)
+	h.chatlog(d, "", "wake", "load", h.path("list.txt"))
+	in := fmt.Sprintf(`{"session_id":"s1","cwd":%q,"source":"compact"}`, h.dir)
+	h.chatlog(d, in, "hook", "SessionStart")
+	st, err := store.Open(h.path("d/chatlog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.KVWrite(context.Background(), "global", map[string]string{"sit/醒/done": "LOADED"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := h.chatlog(d, "", "wake"); strings.Contains(out, "kv_write sit/醒/done") && !strings.Contains(out, "sit/<g>/done") {
+		t.Fatalf("the wake is done, the outline still names it owed:\n%s", out)
+	}
+}

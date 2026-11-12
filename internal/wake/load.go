@@ -49,6 +49,10 @@ func ParseListFile(r io.Reader) (List, []Note, error) {
 			if !ok || strings.TrimSpace(val) == "" {
 				return l, notes, fmt.Errorf("line %d: note takes a key and a value", n)
 			}
+			// the situation that arms a wake is all a list file has a reason to write; the list's own keys and the rules are not its to set
+			if !strings.HasPrefix(key, know.SitPrefix) && !strings.HasPrefix(key, store.GlobalPrefix+know.SitPrefix) {
+				return l, notes, fmt.Errorf("line %d: a note's key starts with sit/ or global/sit/, not %q", n, key)
+			}
 			notes = append(notes, Note{key, strings.TrimSpace(val)})
 		default:
 			return l, notes, fmt.Errorf("line %d: %q: a line starts with file, prefix, step or note", n, verb)
@@ -70,20 +74,23 @@ func (l List) Keys() map[string]string {
 	return set
 }
 
-// Stale lists the keys of the list that the set does not carry any more, sorted: a loaded list replaces the one before.
-func Stale(ctx context.Context, st *store.Store, set map[string]string) ([]string, error) {
+// PlanReplace is the write that makes set the list: the keys of the list the set does not carry are deleted, each on the
+// condition that it still holds the value this read saw, so a key written meanwhile refuses the whole write instead of
+// being deleted or merged into the new list.
+func PlanReplace(ctx context.Context, st *store.Store, set map[string]string) (store.KVPlan, error) {
 	kvs, err := st.KVRead(ctx, store.GlobalProject, nil, []string{ListPrefix}, time.Time{})
 	if err != nil {
-		return nil, err
+		return store.KVPlan{}, err
 	}
-	var del []string
+	plan := store.KVPlan{Project: store.GlobalProject, Set: set, IfValue: map[string]string{}}
 	for _, e := range kvs {
 		if k := store.GlobalPrefix + strings.TrimPrefix(e.Key, store.GlobalPrefix); set[k] == "" {
-			del = append(del, k)
+			plan.Del = append(plan.Del, k)
+			plan.IfValue[k] = e.Value
 		}
 	}
-	slices.Sort(del)
-	return del, nil
+	slices.Sort(plan.Del)
+	return plan, nil
 }
 
 // OwedWith is the owed situations of the merged read kvs (a project's and the global notes under sit/), once the global
