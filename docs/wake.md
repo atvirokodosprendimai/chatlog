@@ -84,8 +84,14 @@ paths first). Nothing else lives outside the notes.
   a file in the project trustworthy. A listed `$PWD/CLAUDE.md` is the same file Claude Code reads on its own.
 - The prefixes are read whole with their bodies and the number of list entries is not capped; the budget bounds the files
   only. A page set in the temp dir stays there until the next dump (mode 0600 in a 0700 dir of the user).
-- A project key of a non-repository directory is now its path with links resolved (`internal/project`): a hook given a cwd
-  that goes through a link and the CLI that reads its own working directory used to name two projects, so a wake armed by
-  the hook was not seen by `chatlog wake`. Keys already stored under the link's own spelling are not moved or merged
-  (nothing is deleted); they stay readable by naming the old `path:` key. A repository is keyed by its root commit and was
-  never affected.
+- A directory is now keyed, and its repository found, by its path **with links resolved** (`internal/project`). Before, a hook
+  given a cwd that goes through a link and the CLI that reads its own working directory named two projects, so a wake armed
+  by the hook was not seen by `chatlog wake` (macOS CI: `/var/folders` is `/private/var/folders`). The price is stated, not
+  hidden: a directory is keyed by where its link leads, so a link that leads out of a repository is no longer that
+  repository's project and one that leads into a repository now is; the first alias (the name) is the resolved base name;
+  a path that cannot be resolved keeps its spelling; and an older binary (a hook not yet upgraded) still keys by the
+  spelling it is given, so during an upgrade the split can come back for those directories. Notes written under another
+  spelling or under the other key are neither moved nor deleted, and they are **not read unasked any more** from that
+  directory: they stay readable by naming the old key (`kv_read project="path:/old/spelling"`, or the sha). There is no
+  alias that bridges them: the store's aliases are names without `:` or `/`, and a bridge would be new machinery for the
+  narrow case of a link that was already two projects depending on who spelled it.
