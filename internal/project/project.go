@@ -9,6 +9,11 @@
 // (see store.ResolveProject); the folder's base name is the first one. The CHATLOG_PROJECT variable overrides all of it with
 // a name, a short sha or an alias: an agent working in ~/work/x for the project y says so there.
 //
+// A directory is named by its path with the links resolved (EvalSymlinks): the same directory reached through a link, or
+// spelled by Claude Code one way and by the system's working directory another (macOS: /var is /private/var), is one
+// project. A repository's key is its root commit and never depended on the spelling. Notes already stored under a
+// "path:<link spelling>" key are not moved: they stay readable by naming that key (project="path:/the/old/spelling"), and
+// `chatlog project ls` lists it; only a non-repository directory reached through a link is affected.
 // Two clones of one repository share a root commit and so are one project; to keep them apart, set CHATLOG_PROJECT in one.
 package project
 
@@ -60,6 +65,9 @@ func Resolve(cwd string, c Cache) ID {
 func FromCwd(cwd string, c Cache) ID {
 	if cwd == "" {
 		return ID{Key: "unknown", Name: "unknown"}
+	}
+	if real, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = real // one directory is one project however it is spelled: the hook is given Claude Code's spelling, the CLI the system's
 	}
 	root := Root(cwd)
 	id := ID{Key: "path:" + root, Name: filepath.Base(root), Root: root}

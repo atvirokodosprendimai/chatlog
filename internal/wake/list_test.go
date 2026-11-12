@@ -250,7 +250,7 @@ func TestAListedFileOutsideHomeAndProjectOrSecretByNameIsRefused(t *testing.T) {
 		os.WriteFile(p, []byte(s), 0o600)
 	}
 	os.Symlink(key, filepath.Join(work, "NOTES.md")) // a hostile repo's link to the key
-	l := List{Files: []string{good, key, env, out, "/proc/self/environ"}}
+	l := List{Files: []string{good, key, env, out, "/etc/hosts"}}
 	r, err := Build(context.Background(), listStore(t), "webshop", l, home, work)
 	if err != nil {
 		t.Fatal(err)

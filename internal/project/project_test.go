@@ -28,6 +28,7 @@ func repo(t *testing.T, dir, file string) string {
 
 func TestASubdirectoryIsItsRepositorysProject(t *testing.T) {
 	r := repo(t, filepath.Join(t.TempDir(), "webshop"), "a")
+	r, _ = filepath.EvalSymlinks(r) // a temp dir may be reached through a link (macOS); the project's root is spelled resolved
 	os.MkdirAll(filepath.Join(r, "scripts", "deep"), 0o700)
 	top, sub := Resolve(r, nil), Resolve(filepath.Join(r, "scripts", "deep"), nil)
 	if !IsSha(top.Key) || top.Key != sub.Key || sub.Name != "webshop" || sub.Root != r {
@@ -60,6 +61,7 @@ func TestARenamedFolderIsTheSameProject(t *testing.T) {
 func TestWithoutARepositoryTheRootPathIsTheKey(t *testing.T) {
 	d := filepath.Join(t.TempDir(), "notes")
 	os.MkdirAll(d, 0o700)
+	d, _ = filepath.EvalSymlinks(d)
 	got := Resolve(d, nil)
 	if got.Key != "path:"+d || got.Name != "notes" || got.Root != d {
 		t.Fatalf("%+v", got)
@@ -87,6 +89,7 @@ func (m memCache) PutRootKey(root, key string)        { m[root] = key }
 
 func TestTheCacheSavesWalkingTheHistory(t *testing.T) {
 	r := repo(t, filepath.Join(t.TempDir(), "big"), "a")
+	r, _ = filepath.EvalSymlinks(r) // the cache is by the resolved root
 	c := memCache{}
 	k := Resolve(r, c).Key
 	if c[r] != k {
