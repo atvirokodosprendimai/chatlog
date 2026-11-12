@@ -117,8 +117,8 @@ func TestReminderClipsAFreeSource(t *testing.T) {
 func TestOwedTakesTheLaterOfTwoDoneRows(t *testing.T) {
 	t0 := time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
 	rows := []store.KV{armKV("a", "clear", t0),
-		{Key: DoneKey("a"), Value: "x", Time: t0.Add(-time.Hour)},
-		{Key: DoneKey("a"), Value: "y", Time: t0.Add(time.Second), Project: "global"}}
+		{Key: DoneKey("a"), Value: "y", Time: t0.Add(time.Second), Project: "global"}, // the later one first: the last row in the slice must not win
+		{Key: DoneKey("a"), Value: "x", Time: t0.Add(-time.Hour)}}
 	if got := Owed(rows); len(got) != 0 {
 		t.Fatalf("%v", got)
 	}

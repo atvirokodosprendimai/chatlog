@@ -86,7 +86,7 @@ func Owed(kvs []store.KV) []Arm {
 	done := map[string]time.Time{}
 	for _, e := range kvs {
 		if strings.HasPrefix(e.Key, SitPrefix) && strings.HasSuffix(e.Key, "/done") {
-			done[e.Key] = e.Time
+			done[e.Key] = laterOf(done[e.Key], e.Time) // a done of the project and one of global (the other scope) both count
 		}
 	}
 	var out []Arm
@@ -104,10 +104,21 @@ func Owed(kvs []store.KV) []Arm {
 	return out
 }
 
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+
 // Reminder is the line an owed situation puts on a prompt: short, naming the command that loads and the key that finishes.
 func Reminder(a Arm, dir string) string {
+	src := a.Source // the hook's input, free text: clipped so the line keeps its size
+	if len(src) > 16 {
+		src = strings.ToValidUTF8(src[:16], "")
+	}
 	return fmt.Sprintf("WAKE NOT DONE (%s, since %s): run chatlog wake --dump %s, read EVERY page in ONE turn in parallel, then kv_write %s = its LOADED line and tell the user it. Repeats each prompt until done.",
-		a.Source, a.Since.UTC().Format(time.RFC3339), dir, DoneKey(a.Group))
+		src, a.Since.UTC().Format(time.RFC3339), dir, DoneKey(a.Group))
 }
 
 // Reminders is the lines for the owed situations, the first three, then a count of the rest; "" when nothing is owed.
