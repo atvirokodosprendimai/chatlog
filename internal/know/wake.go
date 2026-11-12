@@ -4,7 +4,11 @@
 package know
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -116,4 +120,11 @@ func Reminders(arms []Arm, dir string) string {
 		lines = append(lines, Reminder(a, dir))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// DumpDir is where `chatlog wake --dump` puts a project's pages, and where the reminder tells the session to look: one per
+// project, so two sessions waking at once do not overwrite each other's pages.
+func DumpDir(project string) string {
+	sum := sha1.Sum([]byte(project))
+	return filepath.Join(os.TempDir(), "chatlog-wake-"+hex.EncodeToString(sum[:4]))
 }

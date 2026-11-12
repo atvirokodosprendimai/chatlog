@@ -34,7 +34,9 @@ func armKV(g, src string, at time.Time) store.KV {
 
 func TestOwedIsArmedWithoutALaterDone(t *testing.T) {
 	t0 := time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
-	done := func(g string, at time.Time) store.KV { return store.KV{Key: DoneKey(g), Value: "LOADED files=9/9", Time: at} }
+	done := func(g string, at time.Time) store.KV {
+		return store.KV{Key: DoneKey(g), Value: "LOADED files=9/9", Time: at}
+	}
 	for _, c := range []struct {
 		name string
 		kvs  []store.KV
