@@ -117,9 +117,9 @@ Knowledge in kv (the hooks apply these notes; a new rule is a kv_write, never a 
                            carries a WAKE NOT DONE line and the situation until sit/<g>/done is written, value the LOADED line, later
                            than the arm; a second event arms it again. Without on/ keys a situation fires per match and is not sticky.
   global/wake/file/<n>     a path to load whole (~, $HOME, $PWD expand; a missing file is printed MISSING); global/wake/prefix/<n> a kv prefix to
-                           read with full 1; global/wake/step/<n> a free line. `chatlog wake` prints the list with line counts and the LOADED
-                           line to answer with; `chatlog wake --dump DIR` writes it into pages of at most 24000 bytes, read all in ONE parallel turn;
-                           `chatlog wake load FILE` writes the list from a file (docs/wake.md). Without a list `chatlog wake` is the digest.
+                           read with full 1; global/wake/step/<n> a free line. chatlog wake prints the list with line counts and the LOADED
+                           line to answer with; chatlog wake --dump DIR writes it into pages of at most 24000 bytes, read all in ONE parallel turn;
+                           chatlog wake load FILE writes the list from a file (docs/wake.md). Without a list chatlog wake is the digest.
   hook/check/rule/<n>      "TOOLRX :: INRX :: message": a turn that made such a call is told message at the next prompt
   hook/check/change/<n>    a regex over Bash commands that counts as a state change (with no kv_write: a miss)
   hook/check/bare, hook/check/skip/<n>   answers that need no recall (comma list), prompt prefixes not audited
