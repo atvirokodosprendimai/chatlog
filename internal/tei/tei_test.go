@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,5 +61,30 @@ func TestServerErrorIsRetried(t *testing.T) {
 	}
 	if n := hits.Load(); n != 3 || len(vecs) != 1 {
 		t.Fatalf("hits %d vectors %d, want 3 and 1", n, len(vecs))
+	}
+}
+
+// A reranker with a 2048-token context holds 2048 tokens per pair and does not truncate: a longer text fails the whole call.
+func TestRerankSendsClippedTexts(t *testing.T) {
+	var longest int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Texts []string `json:"texts"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		out := []map[string]any{}
+		for i, s := range req.Texts {
+			longest = max(longest, len(s))
+			out = append(out, map[string]any{"index": i, "score": 0.5})
+		}
+		json.NewEncoder(w).Encode(out)
+	}))
+	defer srv.Close()
+	long := strings.Repeat("žodis ", 3000)
+	if _, err := New(srv.URL, srv.URL).Rerank(t.Context(), "q", []string{long, "short"}); err != nil {
+		t.Fatal(err)
+	}
+	if longest > RerankInputBytes {
+		t.Fatalf("sent %d bytes, want at most %d", longest, RerankInputBytes)
 	}
 }
