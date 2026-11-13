@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -19,6 +20,10 @@ import (
 // MaxInputBytes clips what is sent. The model truncates at 8192 tokens anyway (auto_truncate), and TEI refuses a body over 2 MB.
 const MaxInputBytes = 64 << 10
 
+// RerankInputBytes clips what is reranked: a reranker with a 2048-token context holds 2048 tokens per query and text pair and does not truncate, and ~3 bytes make a token.
+// shortcut: dense text (base64, hashes) can still pass 2048 tokens in 4 KB; clip by tokens if that shows up.
+const RerankInputBytes = 4 << 10
+
 // ErrOff is returned at once when no URL is configured for the call: the step is off, not failing.
 var ErrOff = errors.New("not configured")
 
@@ -26,7 +31,7 @@ var ErrOff = errors.New("not configured")
 type Client struct {
 	EmbedURL, RerankURL string
 	HTTP                *http.Client
-	Attempts            int // bounded retries of a network error or a 5xx
+	Attempts            int // bounded retries of a refused connection or a 5xx; a timeout is not retried
 }
 
 // New returns a client with bounded retries.
@@ -69,6 +74,9 @@ func (c *Client) post(ctx context.Context, url string, body, into any) error {
 		last = c.once(ctx, url, b, into)
 		if last == nil {
 			return nil
+		}
+		if ne := net.Error(nil); errors.As(last, &ne) && ne.Timeout() {
+			return last // the server may still be computing it: a resend doubles the work
 		}
 		if se, ok := last.(statusError); ok && se.code < 500 {
 			return last // a refusal: the same request gets the same answer
@@ -124,7 +132,7 @@ func (c *Client) Rerank(ctx context.Context, query string, texts []string) ([]fl
 	}
 	in := make([]string, len(texts))
 	for i, t := range texts {
-		in[i] = Clip(t, MaxInputBytes)
+		in[i] = Clip(t, RerankInputBytes)
 	}
 	var out []struct {
 		Index int     `json:"index"`

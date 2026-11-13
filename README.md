@@ -50,6 +50,12 @@ A container image exists for running the MCP server without installing anything:
 - **Wake** (`chatlog wake --kind compact|clear|start`): at session start the hook injects a bounded digest (24000 bytes
   by default): the rule above, your notes, the latest exchanges with their tool calls, and the exact calls that fetch
   more. A compaction gets the most, a `/clear` only the notes.
+- **Wake, whole** (`chatlog wake`, [docs/wake.md](docs/wake.md)): the wake list is three kinds of note in the global notes
+  (`global/wake/file/<n>` a path, `global/wake/prefix/<n>` a kv prefix, `global/wake/step/<n>` a free line), so every
+  project and every machine that shares the notes loads the same. A situation with `sit/<g>/on/<n>` = `startup|compact|clear`
+  is armed by that event and every later prompt, the user's or a cron tick, says `WAKE NOT DONE` until a `kv_write` of
+  `sit/<g>/done` (the LOADED line) is newer. `chatlog wake --dump DIR` writes the list into pages of at most 24000 bytes to
+  read in one parallel turn. A new machine: install chatlog, then `chatlog wake load docs/wake-list.txt`.
 - **Server** (`chatlog server`): keeps the database current from every transcript (a scan every 30 s), makes vectors
   when an embedder is configured, and answers searches on a unix socket (mode 0600). `chatlog mcp` starts it when
   nothing answers and it exits after 2 idle hours, so there is no service to install (`CHATLOG_AUTOSTART=0` turns
@@ -70,11 +76,18 @@ Origin: the exchange typed into a subagent's window is `subagent`, the rest `mai
 
 Archive: a row can be archived, kept but hidden from every read (`chat_search`, `chat_tail`, the wake digest) because it is old and maybe no longer true. `chat_search archive=true` (`chatlog search --archive`) also searches it, and a hit says `archived: true`. The one way to change a row is `chat_archive id archived=false why=...`: it restores that row only, with a why that says what was checked, kept in the events table, and answers with the archived rows one link away (the same source drawer, the same entity of a fact, a replaced version), id and one line each, best linked first, at most 10 and a count of the rest. Nothing is restored for you: read each neighbour and restore the ones that still hold. `archived=true` puts a row back; `chatlog status` counts them.
 
+Notes, beyond the above (`kv_read`, `kv_write`, `kv_search`, `chat_search`); the design, its invariants and its limits: [docs/kv-cas.md](docs/kv-cas.md).
+- Every key read has `age` (`40s`, `25m`, `14h`, `3d`); a key past its optional `expires_at` (`kv_write expires`, any key; a span `12h`/`7d` or RFC3339), or without one a key under `now/`, `waits/`, `task/`, `todo/` or `promise/` (not `task/done/`) older than 12 h; the knowledge base (`fact/`, `known/`, `rule/`, `tool/`, `lib/`) is never stale unless it has an expiry, has `stale: true` (`store.KVStaleAfter`, `kvLivePrefixes`). With `at`, age is counted to `at`. `kv_read stale=1` lists only the stale keys. A delete is soft (a tombstone row): `with_deleted=1` on `kv_read` or `kv_search` returns it at its last value with `deleted_at`.
+- **Conditions** (`kv_write if_absent: [keys]`, `if_value: {key: expected}`): checked in the write's own transaction; a refusal writes nothing and names each key with its value, time and the project it lives in. Claim a shared number: `if_absent: ["task/adr/7"]`.
+- **Long notes** (`kv_write body: {key: text}`, at most 8 KiB; the `set` value stays the head and is required): `kv_read` shows `has_body`, the text with `full: 1`; `kv_search` indexes the head only.
+- **Looking** (`kv_read keys_only: 1`, `changed_since: 1h|RFC3339`): key, age, bytes, stale without values; only the keys written or deleted since. Both combine with prefixes and `stale`.
+- `chat_search until` (exclusive, pairs with `since`) and `role: user|assistant|any` (a role matches by words in that role's text). The words, the invariants, the compat and the limits: [docs/kv-cas.md](docs/kv-cas.md).
+
 **How it is meant to be used** (stores, note keys, value format, tasks as steps, waking up): `docs/playbook.md`.
 
 ## Recall by hand
 
-    chatlog search "why did we drop the cache" [--since 2026-11-01] [--repo webshop] [--limit 10]
+    chatlog search "why did we drop the cache" [--since 2026-11-01] [--until 2026-11-12] [--role user|assistant|any] [--repo webshop] [--limit 10]
     chatlog wake --kind compact          # what a session sees after a compaction
     chatlog events --limit 20            # the latest hook records: prompts, tool calls with durations
     chatlog status
@@ -168,6 +181,7 @@ cause and its consequence, not a list of faults: it is whatever you want to happ
     chatlog doctor                              check the install
     chatlog hook EVENT                          what the hooks run (stdin: the event's JSON)
     chatlog wake --kind compact|clear|start     the session-start digest
+    chatlog wake [--dump DIR] | load FILE       the wake list loaded whole (pages, LOADED counts) / written from a file
     chatlog seed [--dry-run]                    the starter notes, where absent
     chatlog ingest --all | FILE...              read existing transcripts once, from where each was left
     chatlog server [--once] [--idle D] [--stop] ingest, embed, serve the socket

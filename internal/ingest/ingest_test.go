@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -184,5 +185,50 @@ func TestEmbedLaterWhenTEIReturns(t *testing.T) {
 	st, _ = in.Store.Stats(ctx)
 	if st.Pending != 0 || vec.Count() != 1 {
 		t.Fatalf("%+v vec %d", st, vec.Count())
+	}
+}
+
+// A search query waits in TEI's queue behind every bulk text in flight and gets 5 s, so few texts may be in flight at once.
+func TestEmbedKeepsFewTextsInFlight(t *testing.T) {
+	dir, p, in := setup(t)
+	ctx := context.Background()
+	for i := range 20 {
+		appendTo(t, p, human(fmt.Sprintf("u%d", i), fmt.Sprintf("klausimas %d", i))+reply(fmt.Sprintf("a%d", i), fmt.Sprintf("atsakymas %d", i)))
+	}
+	if err := in.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	vec, err := vector.Open(filepath.Join(dir, "vec"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inFlight, most atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Inputs []string `json:"inputs"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		n := inFlight.Add(int32(len(req.Inputs)))
+		for m := most.Load(); n > m && !most.CompareAndSwap(m, n); m = most.Load() {
+		}
+		time.Sleep(20 * time.Millisecond)
+		inFlight.Add(-int32(len(req.Inputs)))
+		out := make([][]float32, len(req.Inputs))
+		for i := range out {
+			out[i] = []float32{1, 0}
+		}
+		json.NewEncoder(w).Encode(out)
+	}))
+	defer srv.Close()
+	in.TEI, in.Vec = tei.New(srv.URL, srv.URL), vec
+	if err := in.Embed(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := in.Store.Stats(ctx)
+	if st.Pending != 0 {
+		t.Fatalf("pending %d after embed", st.Pending)
+	}
+	if m := most.Load(); m > 2 {
+		t.Fatalf("%d texts in flight at once, want at most 2", m)
 	}
 }

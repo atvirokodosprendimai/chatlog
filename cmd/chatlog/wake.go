@@ -6,7 +6,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/atvirokodosprendimai/chatlog/internal/config"
+	"github.com/atvirokodosprendimai/chatlog/internal/know"
 	"github.com/atvirokodosprendimai/chatlog/internal/playbook"
 	"github.com/atvirokodosprendimai/chatlog/internal/project"
 	"github.com/atvirokodosprendimai/chatlog/internal/store"
@@ -23,15 +26,25 @@ import (
 func wakeCmd(cfg config.File) *cli.Command {
 	return &cli.Command{
 		Name:  "wake",
-		Usage: "print the recovery digest the session-start hook injects: the rule, the notes, the latest exchanges with their tool calls",
+		Usage: "load what the wake list names (files, kv prefixes, steps), whole; with no list: the recovery digest the session-start hook injects",
+		Description: fmt.Sprintf("With a wake list in the global notes (wake/file, wake/prefix, wake/step; `chatlog wake load FILE` writes it) this prints what to read\n"+
+			"whole and the LOADED line to answer with; --dump DIR writes it all into pages of at most %d bytes to read in one parallel turn.\n"+
+			"Without a list, or with --digest, --kind or --bytes, it prints the digest: the rule, the notes, the latest exchanges.", wake.PageMax),
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "kind", Value: wake.Start, Usage: "compact (full), clear (notes only) or start"},
-			&cli.StringFlag{Name: "project", Usage: "default: the base name of the current directory"},
-			&cli.IntFlag{Name: "bytes", Value: cfg.Hooks.Wake(), Usage: "the cap"},
+			&cli.StringFlag{Name: "kind", Value: wake.Start, Usage: "digest: compact (full), clear (notes only) or start"},
+			&cli.StringFlag{Name: "project", Usage: "default: the project of the current directory"},
+			&cli.IntFlag{Name: "bytes", Value: cfg.Hooks.Wake(), Usage: "digest: the cap"},
+			&cli.BoolFlag{Name: "digest", Usage: "print the digest even when a wake list exists"},
+			&cli.StringFlag{Name: "dump", Usage: fmt.Sprintf("write the list's content into DIR as page-NN.txt (at most %d bytes each) and print the pages and the LOADED counts", wake.PageMax)},
 		},
+		Commands: []*cli.Command{wakeLoadCmd()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if !slices.Contains(wake.Kinds, cmd.String("kind")) {
 				return fmt.Errorf("--kind: one of %s", strings.Join(wake.Kinds, ", "))
+			}
+			digestAsked := cmd.Bool("digest") || cmd.IsSet("kind") || cmd.IsSet("bytes")
+			if cmd.IsSet("dump") && (digestAsked || cmd.String("dump") == "") {
+				return fmt.Errorf("--dump DIR writes the wake list into DIR; it cannot go with --digest, --kind or --bytes, and DIR is required")
 			}
 			st, err := openStore(cmd, 5*time.Second)
 			if err != nil {
@@ -39,9 +52,21 @@ func wakeCmd(cfg config.File) *cli.Command {
 			}
 			defer st.Close()
 			p := cmd.String("project")
+			cwd, _ := os.Getwd()
 			if p == "" {
-				cwd, _ := os.Getwd()
 				p = project.Resolve(cwd, st).Key
+			}
+			if !digestAsked {
+				l, err := wake.ReadList(ctx, st)
+				if err != nil {
+					return err
+				}
+				if !l.Empty() {
+					return printWakeList(ctx, cmd, st, p, cwd, l)
+				}
+				if cmd.IsSet("dump") {
+					return fmt.Errorf("--dump: there is no wake list; `chatlog wake load FILE` writes one (docs/wake.md)")
+				}
 			}
 			d, err := wake.Digest(ctx, st, cmd.String("kind"), p, time.Now(), cmd.Int("bytes"))
 			if err != nil {
@@ -49,6 +74,128 @@ func wakeCmd(cfg config.File) *cli.Command {
 			}
 			fmt.Print(d)
 			return nil
+		},
+	}
+}
+
+// printWakeList prints the wake list read: the outline to read from, or with --dump the pages written and where.
+func printWakeList(ctx context.Context, cmd *cli.Command, st *store.Store, p, cwd string, l wake.List) error {
+	home, _ := os.UserHomeDir()
+	if real, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = real
+	}
+	rep, err := wake.Build(ctx, st, p, l, home, cwd)
+	if err != nil {
+		return err
+	}
+	sit, err := st.KVRead(ctx, p, nil, []string{know.SitPrefix}, time.Time{})
+	if err != nil {
+		return err
+	}
+	owed, err := wake.OwedWith(ctx, st, sit)
+	if err != nil {
+		return err
+	}
+	var groups []string
+	for _, a := range owed {
+		groups = append(groups, a.Group)
+	}
+	if ignored, err := ignoredWake(ctx, st, p); err != nil {
+		return err
+	} else if len(ignored) > 0 {
+		fmt.Printf("== NOTE: wake/ keys in this project's own notes are not read (the wake list is the global notes'): %s\n", strings.Join(ignored, " "))
+	}
+	dir := cmd.String("dump")
+	if dir == "" {
+		fmt.Print(rep.Outline(groups...))
+		return nil
+	}
+	pages, err := wake.Dump(dir, rep.Content())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("== PAGES (at most %d bytes each; the pages listed here, no others): read ALL of them in ONE turn, in parallel\n", wake.PageMax)
+	for _, pg := range pages {
+		fmt.Printf("  %s  %d bytes\n", pg.Path, pg.Bytes)
+	}
+	fmt.Print(rep.Answer(groups...))
+	return nil
+}
+
+// ignoredWake lists the wake/ keys the project's own notes hold: a list is global, so they are not read, and the run says so.
+func ignoredWake(ctx context.Context, st *store.Store, p string) ([]string, error) {
+	kvs, err := st.KVRead(ctx, p, nil, []string{"wake/"}, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, e := range kvs {
+		if e.Project != store.GlobalProject {
+			keys = append(keys, e.Key)
+		}
+	}
+	return keys, nil
+}
+
+func wakeLoadCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "load",
+		ArgsUsage: "FILE|-",
+		Usage:     "write the wake list from a file (file PATH, prefix P, step TEXT, note KEY VALUE per line) into the global notes, replacing the list before",
+		Flags: []cli.Flag{&cli.BoolFlag{Name: "dry-run", Usage: "say what would be written and deleted, write nothing"},
+			&cli.BoolFlag{Name: "clear", Usage: "allow a file with no list entries: the list is deleted"}},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			var r io.Reader = os.Stdin
+			if f := cmd.Args().First(); f != "" && f != "-" {
+				fh, err := os.Open(f)
+				if err != nil {
+					return err
+				}
+				defer fh.Close()
+				r = fh
+			} else if f == "" {
+				return fmt.Errorf("give a file, or - for the standard input")
+			}
+			l, notes, err := wake.ParseListFile(r)
+			if err != nil {
+				return err
+			}
+			set := l.Keys()
+			for _, n := range notes {
+				set[n.Key] = n.Value
+			}
+			st, err := openStore(cmd, 10*time.Second)
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+			if l.Empty() && !cmd.Bool("clear") {
+				return fmt.Errorf("the file has no file, prefix or step line: loading it would delete the whole wake list; add a line, or give --clear to delete it")
+			}
+			plan, err := wake.PlanReplace(ctx, st, set)
+			if err != nil {
+				return err
+			}
+			verbs := map[bool]string{true: "would ", false: ""}[cmd.Bool("dry-run")]
+			keys := make([]string, 0, len(set))
+			for k := range set {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			for _, k := range keys {
+				fmt.Printf("%swrite %s\n", verbs, k)
+			}
+			for _, k := range plan.Del {
+				fmt.Printf("%sdelete %s\n", verbs, k)
+			}
+			if cmd.Bool("dry-run") {
+				return nil
+			}
+			warns, err := st.KVWritePlan(ctx, plan)
+			for _, w := range warns {
+				fmt.Fprintln(os.Stderr, "warning:", w)
+			}
+			return err
 		},
 	}
 }

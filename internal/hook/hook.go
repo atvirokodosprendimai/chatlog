@@ -228,6 +228,9 @@ func Handle(ctx context.Context, in Input, d Deps) (string, error) {
 	if in.Event != "PostToolUse" {
 		errs = append(errs, d.record(ctx, ev))
 	}
+	if in.Event == "SessionStart" && h.On(config.PiecePrompt) {
+		errs = append(errs, d.arm(ctx, in, now))
+	}
 	// The transcript is read once a turn, not at every tool call: re-reading a growing exchange re-indexes its whole text
 	// (measured 150 ms for a turn of a few MB), while the tool rows above already hold each call as it happens.
 	if h.On(config.PieceIngest) && in.Event != "PostToolUse" {

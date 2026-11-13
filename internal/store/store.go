@@ -37,7 +37,7 @@ CREATE TRIGGER IF NOT EXISTS ex_au AFTER UPDATE OF words, answer, text ON exchan
   INSERT INTO fts(rowid, words, answer, text) VALUES (new.id, new.words, new.answer, new.text); END;
 CREATE TABLE IF NOT EXISTS cursors(path TEXT PRIMARY KEY, offset INTEGER NOT NULL, read_to INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS kv(rid INTEGER PRIMARY KEY, key TEXT NOT NULL, value TEXT NOT NULL, time TEXT NOT NULL, deleted INTEGER NOT NULL, project TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kv(rid INTEGER PRIMARY KEY, key TEXT NOT NULL, value TEXT NOT NULL, time TEXT NOT NULL, deleted INTEGER NOT NULL, project TEXT NOT NULL DEFAULT '', expires TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS kv_key ON kv(key, rid);
 CREATE TABLE IF NOT EXISTS kv_vec(rid INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS kv_link(rid INTEGER PRIMARY KEY, s TEXT NOT NULL, p TEXT NOT NULL, o TEXT NOT NULL, time TEXT NOT NULL, deleted INTEGER NOT NULL, project TEXT NOT NULL DEFAULT '');
@@ -93,6 +93,16 @@ func OpenWith(path string, busy time.Duration) (*Store, error) {
 	r.SetMaxOpenConns(8)
 	r.SetMaxIdleConns(8) // closing a connection after each read is what costs: keep them
 	return &Store{w: w, r: r}, nil
+}
+
+// addKVColumn adds a TEXT column with an empty default to kv. The caller checked that it is missing, and another process
+// opening the same old file may have added it since: that is the state wanted, not a failure.
+func addKVColumn(db *sql.DB, col string) error {
+	_, err := db.Exec(`ALTER TABLE kv ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`)
+	if err != nil && strings.Contains(err.Error(), "duplicate column name") {
+		return nil
+	}
+	return err
 }
 
 // Close closes both pools.
@@ -288,8 +298,84 @@ type Filter struct {
 	Since   time.Time
 	Repo    string
 	Origin  string
-	Key     string   // a project named by key or alias: it replaces Repo; see FindProject
-	Names   []string // the names of that project, for the exchanges stored before keys
+	Key     string    // a project named by key or alias: it replaces Repo; see FindProject
+	Names   []string  // the names of that project, for the exchanges stored before keys
+	Until   time.Time // exclusive, so Since and Until tile
+	Role    string    // "user" or "assistant" (from ParseRole): the full-text match is in the user's words or in the answer
+}
+
+// roleColumns maps a search role to the fts column it is matched in: the words are the user's, the answer is the
+// assistant's text (not tool output). "" and "any" are no restriction.
+var roleColumns = map[string]string{"user": "words", "assistant": "answer"}
+
+// ParseRole reads a search role: "" and "any" are every role (returned as ""), "user" and "assistant" themselves.
+func ParseRole(role string) (string, error) {
+	if role == "" || role == "any" {
+		return "", nil
+	}
+	if _, ok := roleColumns[role]; !ok {
+		return "", fmt.Errorf("%q: user, assistant or any", role)
+	}
+	return role, nil
+}
+
+// ceilSecond rounds up to a whole second: a row is stored with whole seconds, so "before 00:00:00.5" is "before 00:00:01".
+func ceilSecond(t time.Time) time.Time {
+	if t.Nanosecond() == 0 {
+		return t
+	}
+	return t.Truncate(time.Second).Add(time.Second)
+}
+
+// ftsMatch is the MATCH expression for the words of a query: each quoted, OR between them, in the role's column when
+// there is one.
+func ftsMatch(terms []string, role string) string {
+	q := make([]string, len(terms))
+	for i, t := range terms {
+		q[i] = `"` + t + `"`
+	}
+	m := strings.Join(q, " OR ")
+	if col := roleColumns[role]; col != "" {
+		return "{" + col + "} : (" + m + ")"
+	}
+	return m
+}
+
+// RoleMatch keeps, of ids, those whose text for the role holds a word of the query: the same match FTS makes, so a
+// candidate found by meaning passes only if it also says one of the words in that role's column. Without a role it
+// keeps them all.
+func (s *Store) RoleMatch(ctx context.Context, ids []int64, query, role string) ([]int64, error) {
+	if roleColumns[role] == "" || len(ids) == 0 {
+		return ids, nil
+	}
+	terms := Terms(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	args := []any{ftsMatch(terms, role)}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.r.QueryContext(ctx, `SELECT rowid FROM fts WHERE fts MATCH ? AND rowid IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ok := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ok[id] = true
+	}
+	var out []int64
+	for _, id := range ids { // the order of ids is the caller's ranking
+		if ok[id] {
+			out = append(out, id)
+		}
+	}
+	return out, rows.Err()
 }
 
 func (f Filter) where() (string, []any) {
@@ -298,6 +384,10 @@ func (f Filter) where() (string, []any) {
 	if !f.Since.IsZero() {
 		cond = append(cond, `e.time >= ?`)
 		args = append(args, stamp(f.Since))
+	}
+	if !f.Until.IsZero() {
+		cond = append(cond, `e.time < ?`)
+		args = append(args, stamp(ceilSecond(f.Until)))
 	}
 	if f.Key != "" {
 		c, a, _ := namedBy(f.Key, f.Names)
@@ -316,10 +406,26 @@ func (f Filter) where() (string, []any) {
 	return " AND " + strings.Join(cond, " AND "), args
 }
 
+// MaxTerms bounds the words of a query: the match grows faster than its input, and the first sixty-four say what is wanted.
+const MaxTerms = 64
+
 var termRE = regexp.MustCompile(`[\pL\pN_]+`)
 
-// Terms splits a query into words.
-func Terms(q string) []string { return termRE.FindAllString(q, -1) }
+// Terms splits a query into its words: each once, at most MaxTerms.
+func Terms(q string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range termRE.FindAllString(q, -1) {
+		if !seen[m] {
+			seen[m] = true
+			out = append(out, m)
+			if len(out) == MaxTerms {
+				break
+			}
+		}
+	}
+	return out
+}
 
 // FTS returns ids by bm25: each word quoted, OR between them, because short questions rarely hold every word of the answer.
 // The user's words count most, the tool output least.
@@ -328,12 +434,9 @@ func (s *Store) FTS(ctx context.Context, query string, n int, f Filter) ([]int64
 	if len(terms) == 0 {
 		return nil, nil
 	}
-	for i, t := range terms {
-		terms[i] = `"` + t + `"`
-	}
 	where, args := f.where()
 	q := `SELECT e.id FROM fts JOIN exchanges e ON e.id = fts.rowid WHERE fts MATCH ?` + where + ` ORDER BY bm25(fts, 5.0, 3.0, 1.0) LIMIT ?`
-	rows, err := s.r.QueryContext(ctx, q, append(append([]any{strings.Join(terms, " OR ")}, args...), n)...)
+	rows, err := s.r.QueryContext(ctx, q, append(append([]any{ftsMatch(terms, f.Role)}, args...), n)...)
 	if err != nil {
 		return nil, err
 	}

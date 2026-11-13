@@ -3,7 +3,9 @@
 
 // Package wake makes the recovery digest a session gets when it starts, after a compaction or after /clear: the
 // first-class rule, the session's own notes, the latest exchanges with their tool calls as one-line heads, and the exact
-// calls that fetch more. It reads the store only, is bounded by a byte cap, and is the same text `chatlog wake` prints.
+// calls that fetch more. It reads the store only, is bounded by a byte cap, and is the text `chatlog wake --digest` prints
+// (and `chatlog wake` when there is no wake list). list.go, load.go and remind.go are the other half: the wake list in the
+// notes, what it loads whole, and the reminder that it is owed (docs/wake.md).
 package wake
 
 import (

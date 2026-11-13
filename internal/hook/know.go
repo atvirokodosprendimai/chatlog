@@ -14,6 +14,7 @@ import (
 	"github.com/atvirokodosprendimai/chatlog/internal/config"
 	"github.com/atvirokodosprendimai/chatlog/internal/know"
 	"github.com/atvirokodosprendimai/chatlog/internal/store"
+	"github.com/atvirokodosprendimai/chatlog/internal/wake"
 )
 
 // Events the knowledge pieces write beside the hooks' own rows, so `chatlog events` shows them.
@@ -41,6 +42,20 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 			errs = append(errs, err)
 		}
 	}
+	printed := map[string]bool{} // the owed situations the reminder prints whole
+	if h.On(config.PiecePrompt) {
+		owed, err := wake.OwedWith(ctx, d.Store, kvs) // a global done counts too: the merged read hides it behind a project's older one
+		errs = append(errs, err)
+		if len(owed) > 0 {
+			parts = append(parts, wake.Reminders(owed, wake.DumpDir(d.project(in))))
+			for _, a := range owed[:min(len(owed), wake.MaxReminders)] {
+				line, err := d.situation(ctx, in, kvs, a.Group)
+				errs = append(errs, err)
+				parts = append(parts, line)
+				printed[a.Group] = true
+			}
+		}
+	}
 	if h.On(config.PieceNotes) {
 		if t := know.Notes(kvs); t != "" {
 			parts = append(parts, t)
@@ -64,7 +79,7 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 		}
 	}
 	if h.On(config.PiecePrompt) {
-		p, es := d.recall(ctx, in, kvs)
+		p, es := d.recall(ctx, in, kvs, printed)
 		parts = append(parts, p...)
 		errs = append(errs, es...)
 	}
@@ -73,7 +88,7 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 
 // recall is the notes found by the prompt's words, then the situations its words name. The search needs the embedder
 // and so the server: when that does not answer in time it is skipped and logged, the situations stay.
-func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV) (parts []string, errs []error) {
+func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV, printed map[string]bool) (parts []string, errs []error) {
 	if d.Recall != nil && know.WantRecall(in.Prompt) {
 		rctx, cancel := context.WithTimeout(ctx, recallBudget)
 		start := time.Now()
@@ -88,15 +103,44 @@ func (d Deps) recall(ctx context.Context, in Input, kvs []store.KV) (parts []str
 	words, badW := know.ParseWords(kvs)
 	_, badS := know.ParseSigs(kvs)
 	_, badC := know.ParseRules(kvs)
+	_, badO := know.ParseOns(kvs)
 	for _, g := range know.MatchWords(words, in.Prompt) {
-		linked, err := d.Store.KVLinkedTo(ctx, d.project(in), know.SitPrefix+g, time.Time{})
+		if printed[g] {
+			continue // already printed whole with its reminder
+		}
+		line, err := d.situation(ctx, in, kvs, g)
 		errs = append(errs, err)
-		parts = append(parts, "situation "+know.Situation(g, value(kvs, know.SitPrefix+g), linked))
+		parts = append(parts, line)
 	}
-	if bad := append(append(badW, badS...), badC...); len(bad) > 0 {
+	if bad := append(append(append(badW, badS...), badC...), badO...); len(bad) > 0 {
 		parts = append(parts, "kv rules NOT read (a pattern Go's regexp rejects, or the wrong shape; fix or delete): "+strings.Join(bad, " "))
 	}
 	return parts, errs
+}
+
+// situation is the line of one situation as a prompt prints it: its note and the keys linked to it.
+func (d Deps) situation(ctx context.Context, in Input, kvs []store.KV, g string) (string, error) {
+	linked, err := d.Store.KVLinkedTo(ctx, d.project(in), know.SitPrefix+g, time.Time{})
+	return "situation " + know.Situation(g, value(kvs, know.SitPrefix+g), linked), err
+}
+
+// arm owes every event situation whose pattern fits the SessionStart source: it writes sit/<g>/armed for the project,
+// and each prompt says so until sit/<g>/done is written later (docs/wake.md).
+func (d Deps) arm(ctx context.Context, in Input, now time.Time) error {
+	kvs, err := d.kv(ctx, in, know.SitPrefix)
+	if err != nil {
+		return err
+	}
+	ons, _ := know.ParseOns(kvs) // a bad one is reported at the next prompt
+	set := map[string]string{}
+	for _, g := range know.MatchOns(ons, in.Source) {
+		set[know.ArmedKey(g)] = know.ArmValue(in.Source, now)
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	_, err = d.Store.KVWrite(ctx, d.project(in), set, nil)
+	return err
 }
 
 func value(kvs []store.KV, key string) string {

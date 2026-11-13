@@ -97,7 +97,7 @@ func TestKVLinkedToNamesTheSubjectsOfAnObject(t *testing.T) {
 func TestKVReadMarksALiveKeyStalePastTheThreshold(t *testing.T) {
 	ctx, s := context.Background(), open(t)
 	old := time.Now().Add(-KVStaleAfter - time.Hour).UTC().Format(kvStamp)
-	for _, k := range []string{"now/jur/api", "waits/m/image", "fact/old"} {
+	for _, k := range []string{"now/jur/api", "waits/m/image", "fact/old", "task/open/x", "task/done/y", "rule/z"} {
 		if _, err := s.w.ExecContext(ctx, `INSERT INTO kv(key, value, time, deleted) VALUES(?,'v',?,0)`, k, old); err != nil {
 			t.Fatal(err)
 		}
@@ -107,7 +107,7 @@ func TestKVReadMarksALiveKeyStalePastTheThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"fact/old": false, "now/fresh": false, "now/jur/api": true, "waits/m/image": true}
+	want := map[string]bool{"task/open/x": true, "task/done/y": false, "rule/z": false, "fact/old": false, "now/fresh": false, "now/jur/api": true, "waits/m/image": true}
 	for _, e := range got {
 		if e.Stale != want[e.Key] {
 			t.Errorf("%s: stale %v, want %v", e.Key, e.Stale, want[e.Key])
