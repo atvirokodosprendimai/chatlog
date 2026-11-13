@@ -36,6 +36,7 @@ const (
 const (
 	rrfK           = 60
 	pool           = 50
+	rerankPool     = 10   // a reranker sharing a GPU with the embedder: ~10 texts fit rerankWait, 50 did not
 	vectorFetch    = 5000 // filters (archive, origin, project) are applied after: a wide list keeps them from emptying the pool
 	maxRerankBytes = 6000
 	queryEmbedWait = 5 * time.Second
@@ -321,10 +322,11 @@ func (s *Service) Search(ctx context.Context, r Request) (Response, error) {
 		scores[id] = 1 / float64(rrfK+i+1)
 	}
 	if mode == ModeRerank && len(ids) > 0 {
-		if err := s.rerank(ctx, r, form, ids, rows, scores); err != nil {
+		head := ids[:min(len(ids), rerankPool)] // the tail keeps its fused order after the reranked head
+		if err := s.rerank(ctx, r, form, head, rows, scores); err != nil {
 			resp.Degraded = append(resp.Degraded, "rerank: "+err.Error())
 		} else {
-			sort.SliceStable(ids, func(i, j int) bool { return scores[ids[i]] > scores[ids[j]] })
+			sort.SliceStable(head, func(i, j int) bool { return scores[head[i]] > scores[head[j]] })
 		}
 	}
 	for _, id := range ids[:min(len(ids), limit)] {
