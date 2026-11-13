@@ -28,7 +28,7 @@ import (
 
 const (
 	flushBytes   = 32 << 20        // commit before holding more text than this in memory
-	embedBatch   = 2               // ~3.7k tokens each at 2-4k tokens/s: a search query queued behind them still fits its 5 s
+	embedBatch   = 1               // ~3.7k tokens each at 2-4k tokens/s: a search query queued behind them still fits its 5 s
 	embedWorkers = 1               // more workers only lengthen that queue: the GPU is the limit, not the client
 	quietAfter   = 5 * time.Minute // an open exchange gets its vector once it stopped growing
 )
