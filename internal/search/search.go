@@ -36,7 +36,7 @@ const (
 const (
 	rrfK           = 60
 	pool           = 50
-	rerankPool     = 10   // a reranker sharing a GPU with the embedder: ~10 texts fit rerankWait, 50 did not
+	rerankPool     = 6    // a reranker sharing a GPU with the embedder: 10 texts took 11-20 s of rerankWait 15 s, 50 never fit
 	vectorFetch    = 5000 // filters (archive, origin, project) are applied after: a wide list keeps them from emptying the pool
 	maxRerankBytes = 6000
 	queryEmbedWait = 20 * time.Second // a query queues behind one bulk text: a 64 KB one (~8k tokens) took up to 19 s on a busy GPU
