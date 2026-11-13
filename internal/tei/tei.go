@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -26,7 +27,7 @@ var ErrOff = errors.New("not configured")
 type Client struct {
 	EmbedURL, RerankURL string
 	HTTP                *http.Client
-	Attempts            int // bounded retries of a network error or a 5xx
+	Attempts            int // bounded retries of a refused connection or a 5xx; a timeout is not retried
 }
 
 // New returns a client with bounded retries.
@@ -69,6 +70,9 @@ func (c *Client) post(ctx context.Context, url string, body, into any) error {
 		last = c.once(ctx, url, b, into)
 		if last == nil {
 			return nil
+		}
+		if ne := net.Error(nil); errors.As(last, &ne) && ne.Timeout() {
+			return last // the server may still be computing it: a resend doubles the work
 		}
 		if se, ok := last.(statusError); ok && se.code < 500 {
 			return last // a refusal: the same request gets the same answer
