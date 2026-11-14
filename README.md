@@ -137,7 +137,7 @@ does not run is named in `degraded`. `chatlog eval FILE` scores the variants on 
 `since` empty (the default) reads the whole existing history on the first `ingest --all`. `hooks.off` turns pieces off:
 `time` (the injected clock), `tools` (tool call records), `ingest` (the transcript pushed at turn end), `recall` (the
 session-start digest), and the knowledge pieces `notes`, `prompt`, `karma`, `check`, `context` (below). `hooks.context_window`
-(tokens of your model's context, default 200000) and `hooks.sleep` (the share of it at which the meter says to sleep,
+(overrides the window detected from the transcript model; 200000 if unknown) and `hooks.sleep` (the share of it at which the meter says to sleep,
 default 0.6) tune the `context` piece. Environment: `CHATLOG_DIR` (data dir), `CHATLOG_SOCKET`, `CHATLOG_CONFIG`,
 `CHATLOG_AUTOSTART=0`.
 

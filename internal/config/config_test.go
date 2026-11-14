@@ -44,12 +44,12 @@ func TestLoad(t *testing.T) {
 func TestMeterAndKnowledgePieces(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("CHATLOG_CONFIG", p)
-	if h := (Hooks{}); h.Window() != DefaultContextWindow || h.SleepShare() != DefaultSleep || !h.On("notes") || !h.On("context") {
-		t.Fatalf("defaults: %d %v", h.Window(), h.SleepShare())
+	if h := (Hooks{}); h.Window(0) != DefaultContextWindow || h.SleepShare() != DefaultSleep || !h.On("notes") || !h.On("context") {
+		t.Fatalf("defaults: %d %v", h.Window(0), h.SleepShare())
 	}
 	os.WriteFile(p, []byte(`{"hooks":{"context_window":1000000,"sleep":0.5,"off":["karma","check"]}}`), 0o600)
 	f, err := Load()
-	if err != nil || f.Hooks.Window() != 1_000_000 || f.Hooks.SleepShare() != 0.5 || f.Hooks.On("karma") || f.Hooks.On("check") || !f.Hooks.On("prompt") {
+	if err != nil || f.Hooks.Window(0) != 1_000_000 || f.Hooks.SleepShare() != 0.5 || f.Hooks.On("karma") || f.Hooks.On("check") || !f.Hooks.On("prompt") {
 		t.Fatalf("%+v %v", f.Hooks, err)
 	}
 	for _, bad := range []string{`{"hooks":{"sleep":1.5}}`, `{"hooks":{"sleep":-0.1}}`, `{"hooks":{"context_window":-5}}`} {
@@ -87,4 +87,13 @@ func TestPathsStayOutOfTheRealHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	testenv.Check(t, append([]string{DataDir(), Dir(), ClaudeDir(), ClaudeJSON(), Path(), sock}, Sources()...)...)
+}
+
+func TestWindowDetectionAndOverride(t *testing.T) {
+	if got := (Hooks{}).Window(1_000_000); got != 1_000_000 {
+		t.Errorf("detected: %d", got)
+	}
+	if got := (Hooks{ContextWindow: 300_000}).Window(1_000_000); got != 300_000 {
+		t.Errorf("override: %d", got)
+	}
 }

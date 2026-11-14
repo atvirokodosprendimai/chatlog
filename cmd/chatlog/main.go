@@ -124,7 +124,7 @@ Knowledge in kv (the hooks apply these notes; a new rule is a kv_write, never a 
   hook/check/change/<n>    a regex over Bash commands that counts as a state change (with no kv_write: a miss)
   hook/check/bare, hook/check/skip/<n>   answers that need no recall (comma list), prompt prefixes not audited
   patterns are Go RE2 (no lookahead); one that does not read is named at the next prompt; chatlog events lists the
-  situations that fired (event Karma). The meter: config hooks.context_window, hooks.sleep (default 0.6).
+  situations that fired (event Karma). The meter reads the window from the model; hooks.context_window overrides it, hooks.sleep defaults to 0.6.
 `
 
 func dataDir(cmd *cli.Command) string { return cmd.String("data-dir") }

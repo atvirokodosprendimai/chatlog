@@ -70,11 +70,11 @@ func (d Deps) promptParts(ctx context.Context, in Input) (parts []string, errs [
 		}
 	}
 	if h.On(config.PieceContext) && in.TranscriptPath != "" {
-		used, err := know.Used(in.TranscriptPath)
+		used, model, err := know.Used(in.TranscriptPath)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
-		if line := know.Meter(used, h.Window(), h.SleepShare()); line != "" {
+		if line := know.Meter(used, h.Window(know.WindowOf(model)), h.SleepShare()); line != "" {
 			parts = append(parts, line)
 		}
 	}
