@@ -20,6 +20,8 @@ func TestShapes(t *testing.T) {
 		{"password=value", "mysql --password=s3cr3t!x db", "s3cr3t!x", " db"},
 		{"env oauth", "CLAUDE_CODE_OAUTH_TOKEN=whatever123", "whatever123", "CLAUDE_CODE_OAUTH_TOKEN="},
 		{"json escaped", `{\"client_secret\":\"zzzsecretzzz\"}`, "zzzsecretzzz", "client_secret"},
+		{"json escaped 2 levels", `\\\"importer-auth\\\":\\\"zzzsecretzzz\\\"`, "zzzsecretzzz", "importer-auth"},
+		{"json escaped 3 levels", `\\\\\\\"DB_PASS\\\\\\\":\\\\\\\"zzzsecretzzz\\\\\\\"`, "zzzsecretzzz", "DB_PASS"},
 		{"bearer", "Authorization: Bearer abc123.def456-ghi", "abc123.def456", "Authorization"},
 		{"basic auth header", "Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz", "Authorization"},
 		{"jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcDEF123_-x", "eyJzdWIiOiIxMjM0In0", ""},
