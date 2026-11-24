@@ -1,0 +1,6 @@
+name: chatlog
+version: 0.1.0
+description: "chatlog — local conversation archive as structural recall: excerpts injected every turn, ids and truncation marked, no network."
+provides_memory_provider: chatlog
+requires_hermes: ">=0.21"
+tags: [memory, chatlog, local, transcripts]
