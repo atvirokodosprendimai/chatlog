@@ -15,6 +15,10 @@ come back automatically, with their tool calls.
 
 Licence: AGPL-3.0-only (see `LICENSE` and `NOTICE`). Copyright (C) 2026 Atviro kodo sprendimai.
 
+## Index
+
+- docs/index.md | session | 2026-11-25 | ttl=4 | ptr=docs/index.md | the project memory: where work stopped (open.md), mistakes; open first in a new session
+
 ## Install
 
 Pick one; then restart Claude Code.
