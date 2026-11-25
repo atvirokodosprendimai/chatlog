@@ -35,3 +35,4 @@ MCP clients pick up new tool fields only after a reconnect (`/mcp`).
 1. Finish the PR #4 review; merge or ask for fixes; thank the contributor in the PR.
 2. Decide the local kv branches: push them as a PR onto main, so main = what runs.
 3. Give the binary a `version` verb (the installed build cannot be named today).
+4. docs/wake.md and docs/kv-cas.md quote a person verbatim and dated (public repo): rewrite as plain intent.

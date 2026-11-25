@@ -17,7 +17,8 @@ Licence: AGPL-3.0-only (see `LICENSE` and `NOTICE`). Copyright (C) 2026 Atviro k
 
 ## Index
 
-- docs/index.md | session | 2026-11-25 | ttl=4 | ptr=docs/index.md | the project memory: where work stopped (open.md), mistakes; open first in a new session
+- AGENTS.md | session | 2026-11-25 | ttl=4 | ptr=AGENTS.md | how an agent organises and searches memory: chatlog (record + kv notes) vs a project's md tree, header lines, read and write rules
+- docs/index.md | session | 2026-11-25 | ttl=4 | ptr=docs/index.md | the project memory and design notes: where work stopped (open.md), mistakes, playbook, hooks, wake; open first in a new session
 
 ## Install
 
