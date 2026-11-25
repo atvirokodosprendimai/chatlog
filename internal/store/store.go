@@ -429,14 +429,36 @@ func Terms(q string) []string {
 
 // FTS returns ids by bm25: each word quoted, OR between them, because short questions rarely hold every word of the answer.
 // The user's words count most, the tool output least.
+// It ranks in the full-text index alone, then keeps, batch by batch in rank order, the ids whose rows pass the filter:
+// joining first read the row of every match, thousands for a common word, each a disk read on a host that caches no data.
+// The result is the join's: the best n by bm25 among the rows that pass, ties by id.
 func (s *Store) FTS(ctx context.Context, query string, n int, f Filter) ([]int64, error) {
 	terms := Terms(query)
-	if len(terms) == 0 {
+	if len(terms) == 0 || n <= 0 {
 		return nil, nil
 	}
-	where, args := f.where()
-	q := `SELECT e.id FROM fts JOIN exchanges e ON e.id = fts.rowid WHERE fts MATCH ?` + where + ` ORDER BY bm25(fts, 5.0, 3.0, 1.0) LIMIT ?`
-	rows, err := s.r.QueryContext(ctx, q, append(append([]any{ftsMatch(terms, f.Role)}, args...), n)...)
+	// The ranked ids are read whole before a row is looked at: a cursor held open while the filter takes a second
+	// connection would let eight searches at once hold the whole pool and wait for each other.
+	ranked, err := s.ranked(ctx, ftsMatch(terms, f.Role))
+	if err != nil {
+		return nil, err
+	}
+	var out []int64
+	size := max(4*n, 64) // most rows are archived: a batch several times n usually fills the answer at once
+	for len(ranked) > 0 && len(out) < n {
+		batch := ranked[:min(size, len(ranked))]
+		ranked = ranked[len(batch):]
+		if out, err = s.passing(ctx, out, batch, n, f); err != nil {
+			return nil, err
+		}
+		size = min(2*size, 8192) // a filter that drops most matches costs a few batches, not one per match; 8192 stays under SQLite's bound on parameters
+	}
+	return out, nil
+}
+
+// ranked returns the ids the full-text match finds, best bm25 first, ties by id; it reads the index only.
+func (s *Store) ranked(ctx context.Context, match string) ([]int64, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT rowid FROM fts WHERE fts MATCH ? ORDER BY bm25(fts, 5.0, 3.0, 1.0), rowid`, match)
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +472,37 @@ func (s *Store) FTS(ctx context.Context, query string, n int, f Filter) ([]int64
 		out = append(out, id)
 	}
 	return out, rows.Err()
+}
+
+// passing appends to out, in the order of ids, those whose rows pass the filter, until out holds n.
+func (s *Store) passing(ctx context.Context, out, ids []int64, n int, f Filter) ([]int64, error) {
+	where, fargs := f.where()
+	args := make([]any, 0, len(ids)+len(fargs))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.r.QueryContext(ctx, `SELECT e.id FROM exchanges e WHERE e.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`+where, append(args, fargs...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ok := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ok[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if ok[id] && len(out) < n {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 const rowCols = `e.id, e.uuid, e.session, e.agent, e.seq, e.source, e.time, e.end_time, e.cwd, e.project, e.closed, e.cut_bytes, e.over_limit, e.sha, e.words, e.answer, e.archived`
