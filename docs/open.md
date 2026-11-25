@@ -2,7 +2,7 @@
 
 Up: index.md
 
-State read 2026-11-25 (GitHub atvirokodosprendimai/chatlog, laptop checkout ~/code/go/teisora/chatlog).
+State read 2026-11-25 (GitHub atvirokodosprendimai/chatlog and the maintainer's local checkout).
 
 ## Open on GitHub
 - PR #4 `feat/hermes-memory-provider` (outside contributor): a Hermes memory provider in `packaging/hermes-plugin/chatlog/`,
@@ -24,11 +24,11 @@ State read 2026-11-25 (GitHub atvirokodosprendimai/chatlog, laptop checkout ~/co
 - `task/kv-expires` (+5 commits on main 36dc2a1): kv_search by meaning, kv_link edges and kv_read follow/linked_to/age,
   `instructions --core`, optional `expires` per key with `kv_read stale=1`, stale prefixes task/ todo/ promise/.
   Also `task/kv-cas`, `task/kv-cas-main` (if_absent / if_value). Not pushed. Which of them the installed binary was built
-  from is not checked: `~/.sandboxes/teisora/bin/chatlog` has no version verb.
+  from is not checked: the installed binary has no version verb.
 - `design.md` untracked in the checkout (system design write-up of 2026-11-13).
 
 ## Install (how it was done)
-Build `go build -o bin/chatlog ./cmd/chatlog`, copy to `~/.sandboxes/teisora/bin/chatlog`, restart the chatlog service;
+Build `go build -o bin/chatlog ./cmd/chatlog`, copy over the installed binary, restart the chatlog service;
 MCP clients pick up new tool fields only after a reconnect (`/mcp`).
 
 ## Next
