@@ -36,6 +36,7 @@ type entry struct {
 	Meta      bool   `json:"isMeta"`
 	Message   struct {
 		Content json.RawMessage `json:"content"`
+		Model   string          `json:"model"`
 		Usage   *struct {
 			In          int `json:"input_tokens"`
 			CacheRead   int `json:"cache_read_input_tokens"`
@@ -146,8 +147,8 @@ func LastTurn(path string) (t Turn, ok bool, err error) {
 }
 
 // Used is the context a conversation holds now: the last main-thread assistant message's input, cache read and cache
-// creation tokens. 0 when the tail has no usage.
-func Used(path string) (n int, err error) {
+// creation tokens and that message's model. 0 and an empty model when the tail has no usage.
+func Used(path string) (n int, model string, err error) {
 	err = backwards(path, func(line []byte) bool {
 		if !bytes.Contains(line, []byte(`"usage"`)) {
 			return false
@@ -158,7 +159,11 @@ func Used(path string) (n int, err error) {
 		}
 		u := e.Message.Usage
 		n = u.In + u.CacheRead + u.CacheCreate
-		return n > 0
+		if n > 0 {
+			model = e.Message.Model
+			return true
+		}
+		return false
 	})
-	return n, err
+	return n, model, err
 }

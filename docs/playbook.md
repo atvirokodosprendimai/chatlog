@@ -174,8 +174,7 @@ mistake to avoid; it is anything you want to happen when that action happens.
   printed at the next prompt as `last turn missed: ...` and then cleared. Prompts starting `<command-message>`, `<command-name>`, `<system-reminder>` or
   `<task-notification>` are not audited.
 - **The context piece** says in every prompt how much of the window is used (the last main-thread message's input, cache
-  read and cache creation tokens), and from `hooks.sleep` of it (60% by default; the window is `hooks.context_window`,
-  200000 by default) it says `SLEEP NOW`: kv_write the pointers before going on, while there is room to do it well.
+  read and cache creation tokens), and from `hooks.sleep` of it (60% by default; the window is detected from the transcript model, falling back to 200000; `hooks.context_window` overrides it) it says `SLEEP NOW`: kv_write the pointers before going on, while there is room to do it well.
 
 One prompt's context comes in this order: time, `hook/prompt/*` lines, last turn's misses, the context line, the notes
 found and the situations the prompt names. `chatlog seed` writes one example of each, close to these, to start from:

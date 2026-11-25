@@ -36,14 +36,14 @@ var rules = []rule{
 	{regexp.MustCompile(`(?i)\b(authorization\s*:\s*)[A-Za-z0-9._~+/=\-]{16,}`), "${1}" + Marker},
 	// scheme://user:password@host: the password is the only secret part.
 	{regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@'"]*:)[^\s/@'"]+(@)`), "${1}" + Marker + "${2}"},
-	// key=value and "key": "value", also JSON escaped one level, as tool input holds it.
+	// key=value and "key": "value", also JSON escaped at any depth: an export wraps tool input that is itself escaped.
 	// \b before the keyword is absent so that ACCESS_TOKEN and client_secret match; a value is required,
 	// and "tokens" does not match because the separator must follow the keyword.
-	{regexp.MustCompile(`(?i)([a-z0-9_\-]*(?:password|passwd|pwd|secret|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|credential)[a-z0-9_\-]*\\?["']?\s*[:=]\s*\\?["']?)([^\s"'\\&,;}\])]{3,})`), "${1}" + Marker},
+	{regexp.MustCompile(`(?i)([a-z0-9_\-]*(?:password|passwd|pwd|secret|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|credential)[a-z0-9_\-]*\\*["']?\s*[:=]\s*\\*["']?)([^\s"'\\&,;}\])]{3,})`), "${1}" + Marker},
 	// short keywords that are also parts of ordinary words (author, compass, bypass, oauth, sessions): only as a whole
 	// word, alone or after a "_"/"-" joined prefix, and right before the separator: DB_PASS= and "auth": match,
 	// "Author:" and "compass:" do not.
-	{regexp.MustCompile(`(?i)((?:^|[^a-z0-9_\-])(?:[a-z0-9]+[_\-])*(?:pass|passphrase|auth|session|sessionid|sid)\\?["']?\s*[:=]\s*\\?["']?)([^\s"'\\&,;}\])]{3,})`), "${1}" + Marker},
+	{regexp.MustCompile(`(?i)((?:^|[^a-z0-9_\-])(?:[a-z0-9]+[_\-])*(?:pass|passphrase|auth|session|sessionid|sid)\\*["']?\s*[:=]\s*\\*["']?)([^\s"'\\&,;}\])]{3,})`), "${1}" + Marker},
 }
 
 // String returns s with every known secret shape replaced by Marker.

@@ -72,22 +72,22 @@ func TestTheTailCutsAtALineStart(t *testing.T) {
 	if err != nil || !ok || got.Prompt != "fix the build" || len(got.Uses) != 2 {
 		t.Errorf("%+v %v %v", got, ok, err)
 	}
-	if n, _ := Used(p); n != 206 {
+	if n, _, _ := Used(p); n != 206 {
 		t.Errorf("used %d", n)
 	}
 }
 
 func TestUsedIsTheLastMainThreadAssistantUsage(t *testing.T) {
-	if n, err := Used(write(t, prompt, call1, result, side, call2, meta)); n != 206 || err != nil {
+	if n, model, err := Used(write(t, prompt, call1, result, side, call2, meta)); n != 206 || model != "" || err != nil {
 		t.Errorf("%d %v: 1+200+5 of the last main-thread message, not the subagent's 9000", n, err)
 	}
-	if n, _ := Used(write(t, prompt, call1, result)); n != 113 {
+	if n, _, _ := Used(write(t, prompt, call1, result)); n != 113 {
 		t.Errorf("%d", n)
 	}
-	if n, _ := Used(write(t, prompt, side)); n != 0 {
+	if n, _, _ := Used(write(t, prompt, side)); n != 0 {
 		t.Errorf("%d: only a subagent's usage is none", n)
 	}
-	if n, _ := Used(write(t, prompt)); n != 0 {
+	if n, _, _ := Used(write(t, prompt)); n != 0 {
 		t.Errorf("%d", n)
 	}
 }
@@ -120,5 +120,13 @@ func TestAFileWithoutATrailingNewlineOrWithOneLine(t *testing.T) {
 	os.WriteFile(p, nil, 0o600)
 	if _, ok, err := LastTurn(p); ok || err != nil {
 		t.Errorf("empty: %v %v", ok, err)
+	}
+}
+
+func TestUsedReturnsModelFromSameMessage(t *testing.T) {
+	p := write(t, `{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":200255}}}`, side)
+	n, model, err := Used(p)
+	if n != 200255 || model != "claude-opus-5-5" || err != nil {
+		t.Fatalf("%d %q %v", n, model, err)
 	}
 }

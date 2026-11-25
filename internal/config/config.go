@@ -35,7 +35,7 @@ type Hooks struct {
 	Off           []string `json:"off,omitempty"`             // pieces turned off, of Pieces
 	MaxFieldBytes int      `json:"max_field_bytes,omitempty"` // cap of a stored prompt, tool input or tool output; default DefaultMaxField
 	WakeBytes     int      `json:"wake_bytes,omitempty"`      // cap of the digest injected at session start; default DefaultWakeBytes
-	ContextWindow int      `json:"context_window,omitempty"`  // tokens of the model's context, for the meter; default DefaultContextWindow
+	ContextWindow int      `json:"context_window,omitempty"`  // override for the context window detected from the transcript model
 	Sleep         float64  `json:"sleep,omitempty"`           // share of the window at which the meter says to sleep (0..1); default DefaultSleep
 }
 
@@ -65,7 +65,7 @@ const (
 	// 40 notes and a dozen turns with their tool calls, small against a 200k-token window; the digest says how to fetch
 	// the rest.
 	DefaultWakeBytes = 24000
-	// DefaultContextWindow is the standard Claude Code context, in tokens; a larger model's is set in hooks.context_window.
+	// DefaultContextWindow is the fallback in tokens when the transcript model's window is unknown and no override is set.
 	DefaultContextWindow = 200_000
 	// DefaultSleep is the share of the window at which the meter says to write the pointers down and sleep: early enough
 	// that there is room to do it well, before an automatic compaction decides for the session.
@@ -92,9 +92,12 @@ func (h Hooks) Wake() int {
 }
 
 // Window is the context size the meter counts against.
-func (h Hooks) Window() int {
+func (h Hooks) Window(detected int) int {
 	if h.ContextWindow > 0 {
 		return h.ContextWindow
+	}
+	if detected > 0 {
+		return detected
 	}
 	return DefaultContextWindow
 }
